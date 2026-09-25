@@ -1,0 +1,8 @@
+# agent session artifacts (never commit)
+.zcode/
+
+# go build/test artifacts
+/mock-oidc
+*.test
+coverage.out
+dist/

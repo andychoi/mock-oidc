@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>mock-oidc debugger | Just a mock oauth2 client</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; background: #fafafa; color: #222; margin: 0; }
+        .container { max-width: 680px; margin: 2rem auto; padding: 0 1rem; }
+        .card { background: #fff; border: 1px solid #e3e3e3; border-radius: 6px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        h2 { margin-top: 0; }
+        .docs-header { margin: 0 0 .75rem; color: #999; font-size: .8rem; text-transform: uppercase; letter-spacing: .1em; }
+        label { display: block; font-size: .85rem; margin-top: .9rem; }
+        pre { background: #f4f4f4; border: 1px solid #e3e3e3; border-radius: 4px; padding: .75rem; overflow-x: auto; font-size: .8rem; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h2>OAuth2 Client Debugger</h2>
+        <div class="docs-header">OpenID Connect Callback</div>
+        <p>Inspect callback parameters and the actual token response</p>
+        <label for="token_request">Token Request</label>
+        <pre id="token_request"><code>{{.token_request}}</code></pre>
+        <label>Token Response</label>
+        <pre><code>{{.token_response}}</code></pre>
+    </div>
+    <div class="card">
+        <div class="docs-header">more debugging options</div>
+        <p>More options will be added shortly</p>
+    </div>
+</div>
+</body>
+</html>

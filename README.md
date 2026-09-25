@@ -1,13 +1,20 @@
 # mock-oidc
 
-Shared **dev/test OIDC identity provider** for Andy's local projects — a containerized
-[navikt/mock-oauth2-server](https://github.com/navikt/mock-oauth2-server) emulating Azure AD.
+Shared **dev/test OIDC identity provider** for Andy's local projects — a mock Azure AD.
+
+The server is **native Go, built from this repo**: a faithful port of
+[navikt/mock-oauth2-server](https://github.com/navikt/mock-oauth2-server) 6.0.2
+(the JVM server this repo used to run as a container). Discovery documents,
+JWKS (including the deterministic initial keys), grant behavior and error
+responses are byte-for-byte compatible with 6.0.2; the rewrite plan and the
+compatibility contract live in [docs/plan](docs/plan/00-overview.md).
 
 Runs standalone on host port **8088**, independent of any project's Docker network —
 apps reach it like an external IdP, mirroring production.
 
 ```
-source: https://github.com/navikt/mock-oauth2-server/pkgs/container/mock-oauth2-server (image tag: 6.0.2)
+image: built from this repo (docker compose up -d --build)
+parity reference: ghcr.io/navikt/mock-oauth2-server:6.0.2
 ```
 
 ## Quick start
@@ -50,7 +57,7 @@ credentials you choose. To hook an app up, fill in these three values yourself:
 
 | Value | What to use | Rules |
 |---|---|---|
-| **Issuer URL** | `http://mock-oidc.dev.test:8088/oidc` (or `http://localhost:8088/oidc` without the `/etc/hosts` entry) | The **last path segment defines the issuer** — any path works, but `/oidc` is the convention (old naming was `/azuread`, now retired). Use one hostname consistently; the server echoes it back as `iss`. |
+| **Issuer URL** | `http://mock-oidc.dev.test:8088/oidc` (or `http://localhost:8088/oidc` without the `/etc/hosts` entry) | The **last path segment defines the issuer** — any path works, but `/oidc` is the convention. Use one hostname consistently; the server echoes it back as `iss`. |
 | **Client ID** | Your app's name, e.g. `dochub`, `signflow` | Any non-empty string. It is echoed back as the token's `aud` claim. |
 | **Client Secret** | `<app>-dev-secret`, e.g. `dochub-dev-secret` | Any string — the token endpoint accepts arbitrary client credentials (Basic auth or form body). |
 | **Redirect URI** | e.g. `http://localhost:3000/api/auth/oidc/callback` | Any URI your app serves. Must be **identical** in the authorize request and the token exchange. |
@@ -134,10 +141,12 @@ app's own DB/seed scripts, not in the IdP (identity only, same as production Azu
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | Service definition (port 8088 → 8080) |
-| `mock-oidc.json` | mock-oauth2-server config (interactive login, token callback sets `tid` on issuer `oidc`) |
+| `docker-compose.yml` | Service definition (Go build, port 8088 → 8080) |
+| `docker-compose.upstream.yml` | Rollback to the upstream 6.0.2 image |
+| `mock-oidc.json` | Server config (interactive login, token callback sets `tid` on issuer `oidc`) |
 | `mock-oidc-login.html` | Custom login page with user quick-picks |
 | `demo-users.json` | Canonical demo user directory |
+| `cmd/mock-oidc`, `internal/`, `mockoidc.go` | The Go server (see [docs/plan](docs/plan/)) |
 
 ## Consumers
 
@@ -146,16 +155,43 @@ app's own DB/seed scripts, not in the IdP (identity only, same as production Azu
 - **signflow** (dev OIDC via `dev.sh`)
 - **ai-dev-platform-feature-aws** (CoderHub login)
 
+## Development
+
+```bash
+go test ./...                       # unit + e2e suites (server on random ports)
+go run ./cmd/mock-oidc              # run locally (falls back to ./config.json or JSON_CONFIG env)
+JSON_CONFIG='{"interactiveLogin":true}' SERVER_PORT=8099 go run ./cmd/mock-oidc
+docker compose up -d --build        # rebuild and restart the shared instance
+```
+
+Config precedence is `JSON_CONFIG` env → `JSON_CONFIG_PATH` (default
+`config.json`) → built-in default `{interactiveLogin: true}`. The JSON schema
+is the mock-oauth2-server one ([reference](docs/plan/03-config.md)).
+
+Parity tip: the behavior of any endpoint can be diffed against upstream 6.0.2
+(`docker compose -f docker-compose.upstream.yml up -d` on a spare port) —
+discovery and JWKS output should match byte-for-byte after substituting the
+host:port.
+
+The Go server is also an importable library for tests:
+
+```go
+s, _ := mockoidc.New(nil)           // github.com/andychoi/mock-oidc
+_ = s.Start("127.0.0.1:0")
+defer s.Stop()
+issuer := s.IssuerURL("default")    // point your app's OIDC client here
+```
+
 ## Notes
 
-- Renamed issuer path `/azuread` → `/oidc` (2026-09). The old path still answers —
-  the server treats any path as an issuer — but consumers should move to `/oidc`.
-- `kid` in JWKS derives from the issuer path segment, so it is now `oidc` (was
-  `azuread`). Consumers that cached the old JWKS re-fetch automatically on unknown
-  `kid` — standard rotation behavior, no action needed.
+- `kid` in JWKS derives from the issuer path segment (`oidc`). Consumers that
+  cached an old JWKS re-fetch automatically on unknown `kid` — standard rotation
+  behavior, no action needed.
 - `tid` in tokens is `mock-tenant-id`, set by the token callback in `mock-oidc.json`.
   Keep the callback's `issuerId` in sync with the issuer path — if it doesn't match,
   the server silently falls back to `tid` = path segment.
-- Upgraded 2.1.10 → 6.0.2 (majors 3–6 breaking changes reviewed: library API,
-  refresh-token strictness, Jackson 3, 1 MiB request cap — none affect this config).
+- The server was rewritten in Go (2026-09); before that it ran upstream
+  mock-oauth2-server 2.1.10 → 6.0.2 as a container. JKS keystores and the JVM
+  test-library API are not part of the Go server; everything else matches 6.0.2
+  (see the compatibility contract in [docs/plan/00-overview.md](docs/plan/00-overview.md)).
 - Keep `demo-users.json` and the login page's `U` array in sync when adding users.
