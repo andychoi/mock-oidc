@@ -1,0 +1,20 @@
+{
+  "interactiveLogin": true,
+  "loginPagePath": "/config/mock-oidc-login.html",
+  "httpServer": "NettyWrapper",
+  "tokenCallbacks": [
+    {
+      "issuerId": "OIDCad",
+      "tokenExpiry": 3600,
+      "requestMappings": [
+        {
+          "requestParam": "grant_type",
+          "match": "authorization_code",
+          "claims": {
+            "tid": "mock-tenant-id"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+[
+  {"username": "admin", "name": "Admin User",   "email": "admin@demo.local", "groups": ["platform-admins", "dochub-admin"]},
+  {"username": "alice", "name": "Alice Park",   "email": "alice@demo.local", "groups": ["dochub-user", "gitea-maintainers"]},
+  {"username": "bob",   "name": "Bob Chen",     "email": "bob@demo.local",   "groups": ["dochub-user", "gitea-developers"]},
+  {"username": "eve",   "name": "Eve Santos",   "email": "eve@demo.local",   "groups": ["dochub-user", "gitea-maintainers"]},
+  {"username": "frank", "name": "Frank Wu",     "email": "frank@demo.local", "groups": ["dochub-user", "gitea-developers"]},
+  {"username": "grace", "name": "Grace Lee",    "email": "grace@demo.local", "groups": []},
+
+  {"username": "mary",  "name": "Mary Johnson", "email": "mary@acme.com",    "groups": ["acme-employees", "dochub-user", "gitea-developers"]},
+  {"username": "tim",   "name": "Tim Miller",   "email": "tim@acme.com",     "groups": ["acme-employees", "dochub-user", "gitea-developers"]},
+  {"username": "kevin", "name": "Kevin Park",   "email": "kevin@acme.com",   "groups": ["acme-employees", "dochub-user", "gitea-maintainers"]},
+  {"username": "tom",   "name": "Tom Anderson", "email": "tom@acme.com",     "groups": ["acme-employees", "dochub-user", "gitea-developers"]},
+  {"username": "mark",  "name": "Mark Kim",     "email": "mark@acme.com",    "groups": ["acme-employees", "dochub-user", "gitea-maintainers"]},
+  {"username": "andy",  "name": "Andy Choi",    "email": "andy@acme.com",    "groups": ["platform-admins", "acme-admins", "dochub-admin"]}
+]

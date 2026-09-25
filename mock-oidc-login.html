@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mock OIDC AD — ACME</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f2f5;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.c{background:#fff;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.1);padding:2rem;width:420px}
+h2{color:#0078d4;margin-bottom:.3rem}
+.sub{color:#666;font-size:.85rem;margin-bottom:1.2rem}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:1rem}
+.b{padding:.5rem .7rem;border:1px solid #ddd;border-radius:6px;background:#fafafa;cursor:pointer;text-align:left}
+.b:hover{background:#e8f0fe;border-color:#0078d4}
+.b .n{font-weight:600;font-size:.9rem}
+.b .r{font-size:.75rem;color:#888}
+.a{border-left:3px solid #d32f2f}
+.u{border-left:3px solid #1976d2}
+.gs{border-left:3px solid #9e9e9e}
+.d{display:flex;align-items:center;margin:1rem 0;color:#999;font-size:.8rem}
+.d::before,.d::after{content:'';flex:1;border-top:1px solid #e0e0e0}
+.d::before{margin-right:.8rem}.d::after{margin-left:.8rem}
+label{display:block;font-size:.85rem;color:#555;margin-bottom:.3rem;font-weight:500}
+input{width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;font-size:.9rem;margin-bottom:.7rem}
+.s{width:100%;padding:.6rem;background:#0078d4;color:#fff;border:none;border-radius:4px;cursor:pointer}
+.lo{text-align:center;font-size:.8rem;color:#999;margin-top:.8rem}
+.lo a{color:#0078d4;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="c">
+<h2>Mock OIDC AD — ACME</h2>
+<p class="sub">Dev SSO — pick a user or sign in manually (password: any value)</p>
+<div class="g" id="btns"></div>
+<div class="d">or sign in manually</div>
+<form method="post" id="f">
+<label>Username</label>
+<input id="u" name="username" placeholder="e.g. andy, mary, kevin, admin">
+<label>Password</label>
+<input type="password" placeholder="any value">
+<input id="cl" name="claims" type="hidden">
+<button type="submit" class="s">Sign In</button>
+</form>
+<div class="lo" id="lo"></div>
+</div>
+<script>
+// Unified user directory — one identity per person, same as production Azure AD.
+// Tokens carry ONLY standard claims: name, email, preferred_username, groups, tid.
+// RBAC = standard `groups` claim with app-prefixed names; each app maps its own prefix:
+//   dochub-*    → DocHub roles        (e.g. dochub-admin → admin, dochub-user → user)
+//   gitea-*     → Gitea teams         (e.g. gitea-maintainers → maintainers team)
+//   acme-*      → org membership      (acme-employees, acme-admins)
+//   platform-*  → platform-wide       (platform-admins)
+// Per-project roles (owner/contributor of project X) are app data — manage in each app, not the IdP.
+//
+// Canonical directory: demo-users.json (keep in sync — this array mirrors it).
+// [username, display_name, email, groups, css_class]
+var U=[
+['admin','Admin User','admin@demo.local',['platform-admins','dochub-admin'],'a'],
+['alice','Alice Park','alice@demo.local',['dochub-user','gitea-maintainers'],'u'],
+['bob','Bob Chen','bob@demo.local',['dochub-user','gitea-developers'],'u'],
+['eve','Eve Santos','eve@demo.local',['dochub-user','gitea-maintainers'],'u'],
+['frank','Frank Wu','frank@demo.local',['dochub-user','gitea-developers'],'u'],
+['grace','Grace Lee','grace@demo.local',[],'gs'],
+['mary','Mary Johnson','mary@acme.com',['acme-employees','dochub-user','gitea-developers'],'u'],
+['tim','Tim Miller','tim@acme.com',['acme-employees','dochub-user','gitea-developers'],'u'],
+['kevin','Kevin Park','kevin@acme.com',['acme-employees','dochub-user','gitea-maintainers'],'u'],
+['tom','Tom Anderson','tom@acme.com',['acme-employees','dochub-user','gitea-developers'],'u'],
+['mark','Mark Kim','mark@acme.com',['acme-employees','dochub-user','gitea-maintainers'],'u'],
+['andy','Andy Choi','andy@acme.com',['platform-admins','acme-admins','dochub-admin'],'a']
+];
+var M={};
+var h='';
+for(var i=0;i<U.length;i++){
+var e=U[i],o={name:e[1],email:e[2],preferred_username:e[2],groups:e[3],tid:'mock-tenant-id'};
+M[e[0]]=o;
+var groups=e[3].length?e[3].join(', '):'guest';
+h+='<button type="button" class="b '+e[4]+'" data-i="'+i+'"><div class="n">'+e[0]+'</div><div class="r">'+groups+' — '+e[1]+'</div></button>';
+}
+document.getElementById('btns').innerHTML=h;
+function doLogin(username,claims){
+document.getElementById('u').value=username;
+document.getElementById('cl').value=JSON.stringify(claims);
+try{localStorage.setItem('mock-sso-user',username)}catch(e){}
+document.getElementById('f').submit();
+}
+document.getElementById('btns').onclick=function(ev){
+var b=ev.target.closest('.b');if(!b)return;
+var d=U[b.getAttribute('data-i')];
+doLogin(d[0],M[d[0]]);
+};
+document.getElementById('f').onsubmit=function(){
+var u=document.getElementById('u').value.trim();
+var c=M[u]||{name:u,email:u+'@demo.local',preferred_username:u+'@demo.local',groups:[],tid:'mock-tenant-id'};
+document.getElementById('cl').value=JSON.stringify(c);
+try{localStorage.setItem('mock-sso-user',u)}catch(e){}
+};
+var saved;try{saved=localStorage.getItem('mock-sso-user')}catch(e){}
+if(saved){
+var el=document.getElementById('lo');
+el.innerHTML='Last signed in as <b>'+saved+'</b> — <a onclick="localStorage.removeItem(\'mock-sso-user\');location.reload()">forget</a>';
+}
+</script>
+</body>
+</html>

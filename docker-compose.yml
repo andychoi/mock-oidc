@@ -1,0 +1,23 @@
+# Standalone Mock OIDC AD — shared dev IdP for ai-docs and ai-dev-platform.
+#
+# Both projects reach this via host port (mock-oidc.dev.test:8088),
+# not via Docker network. This keeps the IdP independent of sdlc-net
+# and coder-network, mirroring production where OIDC AD is external.
+#
+# Usage:
+#   docker compose up -d
+#
+# Consumers configure:
+#   OIDC_ISSUER_URL=http://mock-oidc.dev.test:8088/oidc
+
+services:
+  mock-oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.2
+    ports:
+      - "8088:8080"
+    volumes:
+      - ./mock-oidc.json:/config/mock-oidc.json:ro
+      - ./mock-oidc-login.html:/config/mock-oidc-login.html:ro
+    environment:
+      - JSON_CONFIG_PATH=/config/mock-oidc.json
+    restart: unless-stopped
