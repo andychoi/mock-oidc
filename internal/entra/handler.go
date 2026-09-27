@@ -16,6 +16,7 @@ type Handler struct {
 	cfg      *Config
 	keys     *KeySet
 	consents *ConsentStore
+	codes    *codeStore
 	now      func() time.Time
 }
 
@@ -27,7 +28,7 @@ func WithClock(now func() time.Time) Option { return func(h *Handler) { h.now = 
 
 // New builds a handler for a parsed config.
 func New(cfg *Config, opts ...Option) *Handler {
-	h := &Handler{cfg: cfg, keys: NewKeySet(), consents: NewConsentStore(cfg.Consents), now: time.Now}
+	h := &Handler{cfg: cfg, keys: NewKeySet(), consents: NewConsentStore(cfg.Consents), codes: newCodeStore(), now: time.Now}
 	for _, o := range opts {
 		o(h)
 	}
@@ -64,12 +65,18 @@ func (h *Handler) Handle(req *oauth2.Request) routing.Response {
 }
 
 func (h *Handler) route(req *oauth2.Request, sc scope, rest string) routing.Response {
-	get := req.Method == http.MethodGet
+	get, post := req.Method == http.MethodGet, req.Method == http.MethodPost
 	switch {
 	case get && rest == "v2.0/.well-known/openid-configuration":
 		return h.discovery(req, sc)
 	case get && rest == "discovery/v2.0/keys":
 		return routing.JSONString(h.keys.JWKS())
+	case get && rest == "oauth2/v2.0/authorize":
+		return h.authorizeGet(req, sc)
+	case post && rest == "oauth2/v2.0/authorize":
+		return h.authorizePost(req, sc)
+	case post && rest == "oauth2/v2.0/token":
+		return h.token(req, sc)
 	case rest == "oauth2/v2.0/logout":
 		return logout(req)
 	}
