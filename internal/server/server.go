@@ -16,6 +16,7 @@ import (
 	"github.com/andychoi/mock-oidc/internal/config"
 	"github.com/andychoi/mock-oidc/internal/cors"
 	"github.com/andychoi/mock-oidc/internal/debugger"
+	"github.com/andychoi/mock-oidc/internal/entra"
 	"github.com/andychoi/mock-oidc/internal/grant"
 	"github.com/andychoi/mock-oidc/internal/introspect"
 	"github.com/andychoi/mock-oidc/internal/jsonx"
@@ -159,6 +160,10 @@ func (s *Server) buildRouter() *routing.Router {
 
 	if s.ownBase != nil {
 		debugger.New(s.ownURL, func() *x509.CertPool { return s.trustPool }).Register(rt)
+	}
+	if s.config.Entra != nil {
+		eh := entra.New(s.config.Entra)
+		rt.AddFront("", eh.RoutePattern(), eh.Handle)
 	}
 	return rt
 }

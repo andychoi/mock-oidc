@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/andychoi/mock-oidc/internal/entra"
 	"github.com/andychoi/mock-oidc/internal/token"
 )
 
@@ -31,6 +32,10 @@ type OAuth2Config struct {
 
 	// SSL is set when httpServer.ssl is configured.
 	SSL *SSLSettings
+
+	// Entra enables Entra mode when set (the "entra" JSON block or
+	// ENTRA_CONFIG_PATH); nil keeps the server navikt-only.
+	Entra *entra.Config `json:"-"`
 }
 
 // SSLSettings mirrors the Kotlin SslConfig JSON shape.
@@ -74,6 +79,7 @@ type rawConfig struct {
 	TokenProvider      *tokenProviderConfig `json:"tokenProvider"`
 	TokenCallbacks     []tokenCallbacksJSON `json:"tokenCallbacks"`
 	HTTPServer         json.RawMessage      `json:"httpServer"`
+	Entra              json.RawMessage      `json:"entra"`
 }
 
 // ParseJSON parses an OAuth2Config JSON document.
@@ -163,13 +169,21 @@ func ParseJSON(data []byte) (*OAuth2Config, error) {
 		}
 		cfg.TokenCallbacks = append(cfg.TokenCallbacks, mcb)
 	}
+
+	if len(raw.Entra) > 0 && string(raw.Entra) != "null" {
+		ec, err := entra.ParseConfig(raw.Entra)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Entra = ec
+	}
 	return cfg, nil
 }
 
-// LoadStandalone mirrors StandaloneConfig: JSON_CONFIG env (inline JSON) wins,
-// then JSON_CONFIG_PATH (default config.json, missing file tolerated), then
-// the fallback config {interactiveLogin: true}.
-func LoadStandalone(getenv func(string) string) (*OAuth2Config, error) {
+// loadBaseStandalone mirrors StandaloneConfig: JSON_CONFIG env (inline JSON)
+// wins, then JSON_CONFIG_PATH (default config.json, missing file tolerated),
+// then the fallback config {interactiveLogin: true}.
+func loadBaseStandalone(getenv func(string) string) (*OAuth2Config, error) {
 	if inline := getenv("JSON_CONFIG"); inline != "" {
 		return ParseJSON([]byte(inline))
 	}
@@ -187,4 +201,27 @@ func LoadStandalone(getenv func(string) string) (*OAuth2Config, error) {
 		return nil, kerr
 	}
 	return &OAuth2Config{InteractiveLogin: true, TokenProvider: token.NewTokenProvider(kp, nil)}, nil
+}
+
+// LoadStandalone mirrors StandaloneConfig: JSON_CONFIG env (inline JSON) wins,
+// then JSON_CONFIG_PATH (default config.json, missing file tolerated), then
+// the fallback config {interactiveLogin: true}. ENTRA_CONFIG_PATH, when set,
+// enables Entra mode from a separate file (it overrides an "entra" block).
+func LoadStandalone(getenv func(string) string) (*OAuth2Config, error) {
+	cfg, err := loadBaseStandalone(getenv)
+	if err != nil {
+		return nil, err
+	}
+	if p := getenv("ENTRA_CONFIG_PATH"); p != "" {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("ENTRA_CONFIG_PATH: %w", err)
+		}
+		ec, err := entra.ParseConfig(data)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Entra = ec
+	}
+	return cfg, nil
 }

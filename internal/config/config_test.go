@@ -160,3 +160,51 @@ func TestLoadStandaloneEnvPrecedence(t *testing.T) {
 		t.Errorf("standalone fallback should be interactiveLogin=true")
 	}
 }
+
+func TestParseJSONEntraBlock(t *testing.T) {
+	cfg, err := ParseJSON([]byte(`{"entra": {"tenants": [{"tid": "11111111-1111-1111-1111-111111111111"}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Entra == nil || cfg.Entra.BasePath != "entra" {
+		t.Fatalf("Entra = %+v", cfg.Entra)
+	}
+}
+
+func TestParseJSONWithoutEntraLeavesItNil(t *testing.T) {
+	cfg, err := ParseJSON([]byte(`{"interactiveLogin": true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Entra != nil {
+		t.Fatal("Entra must be nil when not configured")
+	}
+}
+
+func TestParseJSONInvalidEntraFails(t *testing.T) {
+	if _, err := ParseJSON([]byte(`{"entra": {"tenants": []}}`)); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestLoadStandaloneEntraConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "entra.json")
+	if err := os.WriteFile(p, []byte(`{"tenants": [{"tid": "11111111-1111-1111-1111-111111111111"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"JSON_CONFIG": `{"interactiveLogin": true}`, "ENTRA_CONFIG_PATH": p}
+	cfg, err := LoadStandalone(func(k string) string { return env[k] })
+	if err != nil || cfg.Entra == nil || !cfg.InteractiveLogin {
+		t.Fatalf("inline JSON + entra file: cfg=%+v err=%v", cfg, err)
+	}
+	fallback := map[string]string{"JSON_CONFIG_PATH": filepath.Join(dir, "missing.json"), "ENTRA_CONFIG_PATH": p}
+	cfg, err = LoadStandalone(func(k string) string { return fallback[k] })
+	if err != nil || cfg.Entra == nil || !cfg.InteractiveLogin {
+		t.Fatalf("fallback config + entra file: cfg=%+v err=%v", cfg, err)
+	}
+	missing := map[string]string{"JSON_CONFIG": `{}`, "ENTRA_CONFIG_PATH": filepath.Join(dir, "nope.json")}
+	if _, err := LoadStandalone(func(k string) string { return missing[k] }); err == nil {
+		t.Fatal("a missing ENTRA_CONFIG_PATH file must be an error")
+	}
+}
