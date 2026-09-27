@@ -6,3 +6,9 @@
 *.test
 coverage.out
 dist/
+
+# repowise index cache (rebuild with: repowise update)
+/.repowise/
+
+# per-user Claude Code settings
+/.claude/settings.local.json
