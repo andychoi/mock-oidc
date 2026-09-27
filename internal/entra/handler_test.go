@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,4 +71,29 @@ func TestCodeExpiresAfterTenMinutes(t *testing.T) {
 	if resp.Status != http.StatusBadRequest || !strings.Contains(resp.Body, "aadsts70008") {
 		t.Fatalf("status %d body %s", resp.Status, resp.Body)
 	}
+}
+
+func TestConcurrentSignInsRotationAndConsent(t *testing.T) {
+	h := New(mustConfig(t, unitConfig))
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			code := signIn(h, "jane")
+			if resp := redeem(h, code); code == "" || resp.Status != http.StatusOK {
+				t.Errorf("sign-in/redeem failed: code=%q status=%d", code, resp.Status)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			serve(h, http.MethodPost, "http://mock.test/entra/_entra/rotate-keys", "")
+		}()
+		go func() {
+			defer wg.Done()
+			h.consents.Grant("app", "11111111-1111-1111-1111-111111111111")
+			serve(h, http.MethodGet, "http://mock.test/entra/_entra/consents", "")
+		}()
+	}
+	wg.Wait()
 }

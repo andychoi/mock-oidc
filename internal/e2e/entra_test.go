@@ -433,3 +433,105 @@ func TestEntraTokenIssuerHonorsForwardedHeaders(t *testing.T) {
 		t.Fatalf("iss = %v", c["iss"])
 	}
 }
+
+func entraConsentURL(base, seg, clientID string) string {
+	return base + "/entra/" + seg + "/v2.0/adminconsent?client_id=" + clientID +
+		"&redirect_uri=" + url.QueryEscape(entraRedirect) + "&state=cs1&scope=" + url.QueryEscape("https://graph.microsoft.com/.default")
+}
+
+func consentSubmit(t *testing.T, consentURL string, form url.Values) url.Values {
+	t.Helper()
+	status, hdr, body := do(t, http.MethodPost, consentURL, form.Encode(), formHeaders)
+	if status != http.StatusFound {
+		t.Fatalf("consent status %d: %s", status, body)
+	}
+	loc, err := url.Parse(hdr.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc.Query()
+}
+
+func TestEntraAdminConsentFlow(t *testing.T) {
+	_, base := startServer(t, entraConfig)
+	cu := entraConsentURL(base, tidCust, "newapp")
+	_, _, page := do(t, http.MethodGet, cu, "", nil)
+	if !strings.Contains(page, `value="custadmin"`) || !strings.Contains(page, `value="cancel"`) {
+		t.Fatalf("consent page:\n%s", page)
+	}
+	// a non-admin can't grant consent
+	q := consentSubmit(t, cu, url.Values{"action": {"accept"}, "tid": {tidCust}, "username": {"sam"}})
+	if q.Get("error") != "access_denied" || !strings.Contains(q.Get("error_description"), "AADSTS90094") || q.Get("state") != "cs1" {
+		t.Fatalf("non-admin consent = %v", q)
+	}
+	// an admin can
+	q = consentSubmit(t, cu, url.Values{"action": {"accept"}, "tid": {tidCust}, "username": {"custadmin"}})
+	if q.Get("admin_consent") != "True" || q.Get("tenant") != tidCust || q.Get("state") != "cs1" || q.Get("scope") == "" {
+		t.Fatalf("admin consent = %v", q)
+	}
+	_, _, list := do(t, http.MethodGet, base+"/entra/_entra/consents", "", nil)
+	if !strings.Contains(list, `"newapp"`) {
+		t.Fatalf("consents = %s", list)
+	}
+	if code := entraSignIn(t, entraAuthorizeURL(base, tidCust, "newapp", ""), tidCust, "sam").Query().Get("code"); code == "" {
+		t.Fatal("sign-in after consent must succeed")
+	}
+	// reset restores the seed: newapp needs consent again
+	if s, _, _ := do(t, http.MethodPost, base+"/entra/_entra/reset", "", nil); s != http.StatusOK {
+		t.Fatalf("reset status %d", s)
+	}
+	if e := entraSignIn(t, entraAuthorizeURL(base, tidCust, "newapp", ""), tidCust, "sam").Query().Get("error"); e != "consent_required" {
+		t.Fatalf("after reset error = %q", e)
+	}
+}
+
+func TestEntraAdminConsentViaOrganizationsAndCancel(t *testing.T) {
+	_, base := startServer(t, entraConfig)
+	cu := entraConsentURL(base, "organizations", "newapp")
+	if q := consentSubmit(t, cu, url.Values{"action": {"accept"}, "tid": {tidCust}, "username": {"custadmin"}}); q.Get("tenant") != tidCust {
+		t.Fatalf("organizations consent = %v", q)
+	}
+	if q := consentSubmit(t, cu, url.Values{"action": {"cancel"}}); q.Get("error") != "access_denied" || !strings.Contains(q.Get("error_description"), "AADSTS65004") {
+		t.Fatalf("cancel = %v", q)
+	}
+}
+
+func TestEntraAdminConsentRequiresParams(t *testing.T) {
+	_, base := startServer(t, entraConfig)
+	status, _, body := do(t, http.MethodGet, base+"/entra/"+tidCust+"/v2.0/adminconsent?client_id=newapp", "", nil)
+	if status != http.StatusBadRequest || !strings.Contains(body, "redirect_uri") {
+		t.Fatalf("status %d body %s", status, body)
+	}
+}
+
+func TestEntraKeyRotation(t *testing.T) {
+	_, base := startServer(t, entraConfig)
+	signInToken := func() string {
+		loc := entraSignIn(t, entraAuthorizeURL(base, tidCorp, "iam", ""), tidCorp, "jane")
+		_, tok, _ := entraRedeem(t, base, tidCorp, "iam", loc.Query().Get("code"), "", nil)
+		return tok["id_token"].(string)
+	}
+	before := signInToken()
+	_, _, body := do(t, http.MethodPost, base+"/entra/_entra/rotate-keys", "", nil)
+	if !strings.Contains(body, `"entra-2"`) {
+		t.Fatalf("rotate = %s", body)
+	}
+	after := signInToken()
+	verifyEntraJWT(t, base, before) // previous key is still published
+	verifyEntraJWT(t, base, after)
+	do(t, http.MethodPost, base+"/entra/_entra/rotate-keys", "", nil)
+	_, _, jwks := do(t, http.MethodGet, base+"/entra/common/discovery/v2.0/keys", "", nil)
+	if strings.Contains(jwks, `"entra-1"`) || !strings.Contains(jwks, `"entra-3"`) {
+		t.Fatalf("after two rotations JWKS = %s", jwks)
+	}
+}
+
+func TestEntraGroupsHelper(t *testing.T) {
+	_, base := startServer(t, entraConfig)
+	_, doc := entraGetJSON(t, base+"/entra/_entra/groups?tid="+tidCust, nil)
+	for _, g := range []string{"G1", "G2", "G3", "G4"} {
+		if doc[g] != entra.GroupObjectID(tidCust, g) {
+			t.Errorf("%s = %v", g, doc[g])
+		}
+	}
+}

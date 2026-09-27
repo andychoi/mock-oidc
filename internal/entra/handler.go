@@ -57,6 +57,9 @@ func (h *Handler) Handle(req *oauth2.Request) routing.Response {
 	if len(segs) < 3 {
 		return routing.NotFound("not found")
 	}
+	if segs[1] == "_entra" {
+		return h.testAPI(req, strings.Join(segs[2:], "/"))
+	}
 	sc, oerr := h.resolveScope(segs[1])
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
@@ -77,6 +80,10 @@ func (h *Handler) route(req *oauth2.Request, sc scope, rest string) routing.Resp
 		return h.authorizePost(req, sc)
 	case post && rest == "oauth2/v2.0/token":
 		return h.token(req, sc)
+	case get && rest == "v2.0/adminconsent":
+		return h.adminConsentGet(req, sc)
+	case post && rest == "v2.0/adminconsent":
+		return h.adminConsentPost(req, sc)
 	case rest == "oauth2/v2.0/logout":
 		return logout(req)
 	}
