@@ -3,13 +3,11 @@ package token
 import (
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"math/big"
 	"net/url"
 	"strings"
@@ -128,27 +126,7 @@ func audienceClaim(audience []string) any {
 
 // sign produces a compact JWS with header {kid, typ, alg}.
 func (t *TokenProvider) sign(claims map[string]any, issuerID, typ string) string {
-	key := t.keys.SigningKey(issuerID)
-	header := fmt.Sprintf(`{"kid":%s,"typ":%s,"alg":%s}`, jsonQuote(key.Kid), jsonQuote(typ), jsonQuote(key.Alg))
-	payload, _ := json.Marshal(claims) // map keys sorted — semantically identical JWT
-	signingInput := base64.RawURLEncoding.EncodeToString([]byte(header)) +
-		"." + base64.RawURLEncoding.EncodeToString(payload)
-
-	var sig []byte
-	if key.RSA != nil {
-		h := hashFor(key.Alg)
-		digest := hashDigest(signingInput, h)
-		sig, _ = rsa.SignPKCS1v15(rand.Reader, key.RSA, h, digest)
-	} else {
-		h := hashFor(key.Alg)
-		digest := hashDigest(signingInput, h)
-		r, s, _ := ecdsa.Sign(rand.Reader, key.EC, digest)
-		size := (key.EC.Curve.Params().N.BitLen() + 7) / 8
-		sig = make([]byte, 2*size)
-		r.FillBytes(sig[:size])
-		s.FillBytes(sig[size:])
-	}
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
+	return SignJWT(t.keys.SigningKey(issuerID), claims, typ)
 }
 
 // Verify parses and verifies a JWT against the issuer's key, requiring

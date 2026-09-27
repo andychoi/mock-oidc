@@ -14,8 +14,6 @@ import (
 	"math/big"
 	"strings"
 	"sync"
-
-	"github.com/andychoi/mock-oidc/internal/jsonx"
 )
 
 //go:embed initial-keys.json
@@ -154,32 +152,9 @@ func generateKey(issuerID, alg, family string) *SigningKey {
 }
 
 // PublicJWKS renders the public JWKS for an issuer: exactly one key, with the
-// field order the nimbus-based server emits
-// (RSA: kty,e,use,kid,alg,n — EC: kty,use,crv,kid,x,y,alg).
+// field order the nimbus-based server emits.
 func (p *KeyProvider) PublicJWKS(issuerID string) string {
-	k := p.SigningKey(issuerID)
-	var obj jsonx.Obj
-	if k.RSA != nil {
-		obj = jsonx.Obj{
-			{Name: "kty", V: "RSA"},
-			{Name: "e", V: "AQAB"},
-			{Name: "use", V: k.Use},
-			{Name: "kid", V: k.Kid},
-			{Name: "alg", V: k.Alg},
-			{Name: "n", V: base64.RawURLEncoding.EncodeToString(k.RSA.N.Bytes())},
-		}
-	} else {
-		obj = jsonx.Obj{
-			{Name: "kty", V: "EC"},
-			{Name: "use", V: k.Use},
-			{Name: "crv", V: curveName(k.EC.Curve)},
-			{Name: "kid", V: k.Kid},
-			{Name: "x", V: base64.RawURLEncoding.EncodeToString(k.EC.X.Bytes())},
-			{Name: "y", V: base64.RawURLEncoding.EncodeToString(k.EC.Y.Bytes())},
-			{Name: "alg", V: k.Alg},
-		}
-	}
-	return jsonx.Render(jsonx.Obj{{Name: "keys", V: jsonx.Arr{obj}}})
+	return PublicJWKSOf(p.SigningKey(issuerID))
 }
 
 func curveName(c elliptic.Curve) string {
