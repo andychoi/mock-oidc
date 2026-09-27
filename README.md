@@ -103,6 +103,34 @@ OIDC_REDIRECT_URI=http://<app-host>/api/auth/oidc/callback
 The custom login page (`mock-oidc-login.html`) offers one-click sign-in as any
 directory user — **password field accepts any value**.
 
+## Entra mode (Microsoft Entra ID emulation)
+
+Opt-in emulation of Entra ID v2.0 for testing multi-tenant Entra relying parties
+(design: [docs/entra/00-design.md](docs/entra/00-design.md)). Enabled by
+`ENTRA_CONFIG_PATH` (compose mounts `entra-demo.json`) or an `"entra"` block in
+the JSON config. With neither, the server behaves exactly as before.
+
+| Value | Per tenant | "Sign in with Microsoft" (multi-tenant) |
+|---|---|---|
+| Authority (issuer base) | `http://mock-oidc.dev.test:8088/entra/{tid}/v2.0` | `http://mock-oidc.dev.test:8088/entra/organizations/v2.0` |
+| Discovery | `…/entra/{tid}/v2.0/.well-known/openid-configuration` | `issuer` is the template `…/entra/{tenantid}/v2.0` |
+| Token `iss` | `…/entra/{tid}/v2.0` | `…/entra/{user's tid}/v2.0` |
+| Client ID / secret | any | any |
+
+Demo tenants (`entra-demo.json`): Corp `11111111-…` (group names), Customer X
+`22222222-…` (group object IDs, consent required, overage above 5 groups),
+Partner P `33333333-…` (consent required). The account picker needs no password.
+Users cover MFA-required (`mfa`), disabled (`disabled`), overage (`many`), and
+tenant admins for admin consent (`jane`, `custadmin`, `partneradmin`).
+
+Admin consent: `…/entra/{tid|organizations}/v2.0/adminconsent?client_id=…&redirect_uri=…&state=…`.
+
+Test helpers: `GET /entra/_entra/consents`, `POST /entra/_entra/reset`,
+`POST /entra/_entra/rotate-keys`, `GET /entra/_entra/groups?tid=…` (group name → object ID).
+
+Not emulated: real Conditional Access, Microsoft's UI and exact error wording,
+refresh-token redemption, implicit/hybrid flows, Microsoft Graph.
+
 ## User directory
 
 `demo-users.json` is the canonical directory (mirrored in the login page).
@@ -146,6 +174,7 @@ app's own DB/seed scripts, not in the IdP (identity only, same as production Azu
 | `mock-oidc.json` | Server config (interactive login, token callback sets `tid` on issuer `oidc`) |
 | `mock-oidc-login.html` | Custom login page with user quick-picks |
 | `demo-users.json` | Canonical demo user directory |
+| `entra-demo.json` | Entra mode demo tenants and users |
 | `cmd/mock-oidc`, `internal/`, `mockoidc.go` | The Go server (see [docs/plan](docs/plan/)) |
 
 ## Consumers

@@ -1,0 +1,38 @@
+{
+  "basePath": "entra",
+  "defaultGroupLimit": 200,
+  "tokenExpiry": 3600,
+  "tenants": [
+    { "tid": "11111111-1111-1111-1111-111111111111", "name": "Corp (demo)",
+      "domains": ["corp.demo.local"], "groupClaimFormat": "name" },
+    { "tid": "22222222-2222-2222-2222-222222222222", "name": "Customer X (demo)",
+      "domains": ["customer-x.demo.local"], "groupClaimFormat": "object_id",
+      "consentRequired": true, "groupLimit": 5 },
+    { "tid": "33333333-3333-3333-3333-333333333333", "name": "Partner P (demo)",
+      "domains": ["partner-p.demo.local"], "groupClaimFormat": "name", "consentRequired": true }
+  ],
+  "consents": [
+    { "clientId": "iam", "tid": "11111111-1111-1111-1111-111111111111" }
+  ],
+  "users": [
+    { "username": "jane", "tid": "11111111-1111-1111-1111-111111111111", "name": "Jane Kim",
+      "email": "jane@corp.demo.local", "emailVerified": true, "amr": ["pwd", "mfa"], "admin": true,
+      "groups": ["AMS Engineers", "PMO"] },
+    { "username": "leo", "tid": "11111111-1111-1111-1111-111111111111", "name": "Leo Park",
+      "email": "leo@corp.demo.local", "groups": ["PMO"] },
+    { "username": "sam", "tid": "22222222-2222-2222-2222-222222222222", "name": "Sam Lee",
+      "email": "sam@customer-x.demo.local", "groups": ["AMS Service Managers"] },
+    { "username": "custadmin", "tid": "22222222-2222-2222-2222-222222222222", "name": "Customer Admin",
+      "email": "admin@customer-x.demo.local", "admin": true },
+    { "username": "many", "tid": "22222222-2222-2222-2222-222222222222", "name": "Many Groups",
+      "groups": ["G1", "G2", "G3", "G4", "G5", "G6"] },
+    { "username": "mfa", "tid": "22222222-2222-2222-2222-222222222222", "name": "MFA Required",
+      "error": "interaction_required" },
+    { "username": "pat", "tid": "33333333-3333-3333-3333-333333333333", "name": "Pat Doe",
+      "email": "pat@partner-p.demo.local", "groups": ["Partner Staff"] },
+    { "username": "partneradmin", "tid": "33333333-3333-3333-3333-333333333333", "name": "Partner Admin",
+      "admin": true },
+    { "username": "disabled", "tid": "33333333-3333-3333-3333-333333333333", "name": "Disabled User",
+      "error": "invalid_grant" }
+  ]
+}

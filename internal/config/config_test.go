@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/andychoi/mock-oidc/internal/entra"
 )
 
 // The repo's real config must parse unchanged (the core compatibility case).
@@ -206,5 +208,15 @@ func TestLoadStandaloneEntraConfigPath(t *testing.T) {
 	missing := map[string]string{"JSON_CONFIG": `{}`, "ENTRA_CONFIG_PATH": filepath.Join(dir, "nope.json")}
 	if _, err := LoadStandalone(func(k string) string { return missing[k] }); err == nil {
 		t.Fatal("a missing ENTRA_CONFIG_PATH file must be an error")
+	}
+}
+
+func TestEntraDemoFileParses(t *testing.T) {
+	data, err := os.ReadFile("../../entra-demo.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entra.ParseConfig(data); err != nil {
+		t.Fatalf("entra-demo.json: %v", err)
 	}
 }

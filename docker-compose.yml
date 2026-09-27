@@ -13,6 +13,10 @@
 #
 # Consumers configure:
 #   OIDC_ISSUER_URL=http://mock-oidc.dev.test:8088/oidc
+#
+# Entra mode (Microsoft Entra ID emulation, see docs/entra/00-design.md):
+#   per tenant:        http://mock-oidc.dev.test:8088/entra/{tid}/v2.0
+#   multi-tenant:      http://mock-oidc.dev.test:8088/entra/organizations/v2.0
 
 services:
   mock-oidc:
@@ -22,6 +26,8 @@ services:
     volumes:
       - ./mock-oidc.json:/config/mock-oidc.json:ro
       - ./mock-oidc-login.html:/config/mock-oidc-login.html:ro
+      - ./entra-demo.json:/config/entra.json:ro
     environment:
       - JSON_CONFIG_PATH=/config/mock-oidc.json
+      - ENTRA_CONFIG_PATH=/config/entra.json
     restart: unless-stopped
