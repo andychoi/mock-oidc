@@ -165,6 +165,9 @@ func (c *Config) normalize() error {
 			return fmt.Errorf("user %s: error must be %s, %s or %s", u.Username, ErrInteractionRequired, ErrAccessDenied, ErrInvalidGrant)
 		}
 		u.OID = strings.ToLower(u.OID)
+		if u.OID != "" && !guidRE.MatchString(u.OID) {
+			return fmt.Errorf("user %s: oid must be a GUID", u.Username)
+		}
 		if u.OID == "" {
 			u.OID = UUIDv5(oidNamespace, u.TID+":"+u.Username)
 		}

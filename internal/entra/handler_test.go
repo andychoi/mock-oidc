@@ -13,8 +13,11 @@ import (
 	"github.com/andychoi/mock-oidc/internal/routing"
 )
 
+// The unit tenant requires consent and seeds it for client "app", so every
+// sign-in exercises the consents.Has read path.
 const unitConfig = `{
-  "tenants": [{"tid": "11111111-1111-1111-1111-111111111111", "name": "Corp"}],
+  "tenants": [{"tid": "11111111-1111-1111-1111-111111111111", "name": "Corp", "consentRequired": true}],
+  "consents": [{"clientId": "app", "tid": "11111111-1111-1111-1111-111111111111"}],
   "users": [{"username": "jane", "tid": "11111111-1111-1111-1111-111111111111"}]
 }`
 
@@ -73,11 +76,31 @@ func TestCodeExpiresAfterTenMinutes(t *testing.T) {
 	}
 }
 
+func TestPutPurgesExpiredCodes(t *testing.T) {
+	now := time.Unix(1790000000, 0)
+	h := New(mustConfig(t, unitConfig), WithClock(func() time.Time { return now }))
+	stale := signIn(h, "jane")
+	if stale == "" {
+		t.Fatal("sign-in failed")
+	}
+	now = now.Add(11 * time.Minute)
+	if signIn(h, "jane") == "" { // put must sweep the expired entry
+		t.Fatal("second sign-in failed")
+	}
+	h.codes.mu.Lock()
+	_, ok := h.codes.codes[stale]
+	n := len(h.codes.codes)
+	h.codes.mu.Unlock()
+	if ok || n != 1 {
+		t.Fatalf("expired code still stored (entries=%d, found=%v); put must purge expired entries", n, ok)
+	}
+}
+
 func TestConcurrentSignInsRotationAndConsent(t *testing.T) {
 	h := New(mustConfig(t, unitConfig))
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
-		wg.Add(3)
+		wg.Add(4)
 		go func() {
 			defer wg.Done()
 			code := signIn(h, "jane")
@@ -93,6 +116,11 @@ func TestConcurrentSignInsRotationAndConsent(t *testing.T) {
 			defer wg.Done()
 			h.consents.Grant("app", "11111111-1111-1111-1111-111111111111")
 			serve(h, http.MethodGet, "http://mock.test/entra/_entra/consents", "")
+		}()
+		go func() {
+			defer wg.Done()
+			// Reset replaces the consents map while sign-ins read it.
+			serve(h, http.MethodPost, "http://mock.test/entra/_entra/reset", "")
 		}()
 	}
 	wg.Wait()

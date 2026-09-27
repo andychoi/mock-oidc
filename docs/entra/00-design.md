@@ -113,7 +113,8 @@ Unknown `{t}` (not a configured GUID and not `organizations`/`common`) → 400
 | `authorization_endpoint`, `token_endpoint`, `end_session_endpoint`, `jwks_uri` | under `/{base}/{tid}/…` | under `/{base}/{organizations\|common}/…` |
 
 Also: `response_types_supported` `["code","id_token","code id_token","id_token token"]`,
-`response_modes_supported`, `subject_types_supported` `["pairwise"]`,
+`response_modes_supported` `["query","fragment","form_post"]` (mimics Entra; only `query` is
+accepted, see §3.2), `subject_types_supported` `["pairwise"]`,
 `id_token_signing_alg_values_supported` `["RS256"]`, `scopes_supported`,
 `token_endpoint_auth_methods_supported`, `claims_supported`, `request_uri_parameter_supported`
 `false`, `tenant_region_scope` `"NA"`, `cloud_instance_name` `"microsoftonline.com"`. No
@@ -123,6 +124,9 @@ Also: `response_types_supported` `["code","id_token","code id_token","id_token t
 
 - Query is parsed with `oauth2.ParseAuthRequest` (same required parameters as the built-in server).
   Only `response_type=code` is supported; anything else → error redirect `unsupported_response_type`.
+  Only `response_mode=query` (or omitted) is accepted — codes always ride the redirect query — and
+  any other value → 400 `invalid_request`, because a `form_post` client could not receive a GET
+  error redirect either.
 - **GET** renders the account picker: the tenant's users for `/{tid}`, or all users grouped by
   tenant for `organizations`/`common`. Each account is a form posting `tid` + `username` back to
   the same URL (query preserved). No password.

@@ -102,6 +102,17 @@ func TestEntraTenantPathCaseInsensitive(t *testing.T) {
 	if status != http.StatusOK || doc["issuer"] != base+"/entra/"+tidCust+"/v2.0" {
 		t.Fatalf("status %d issuer %v", status, doc["issuer"])
 	}
+	// authorizing and redeeming on an uppercase path still yields lowercase iss/tid
+	upper := strings.ToUpper(tidCust)
+	loc := entraSignIn(t, entraAuthorizeURL(base, upper, "iam", ""), upper, "sam")
+	status, tok, body := entraRedeem(t, base, upper, "iam", loc.Query().Get("code"), "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("token status %d: %s", status, body)
+	}
+	c := verifyEntraJWT(t, base, tok["id_token"].(string))
+	if c["iss"] != base+"/entra/"+tidCust+"/v2.0" || c["tid"] != tidCust {
+		t.Errorf("iss/tid must stay lowercase: %v %v", c["iss"], c["tid"])
+	}
 }
 
 func TestEntraUnknownTenant(t *testing.T) {
@@ -408,6 +419,21 @@ func TestEntraUnsupportedResponseType(t *testing.T) {
 	loc, _ := url.Parse(hdr.Get("Location"))
 	if status != http.StatusFound || loc.Query().Get("error") != "unsupported_response_type" {
 		t.Fatalf("status %d location %s", status, hdr.Get("Location"))
+	}
+}
+
+func TestEntraUnsupportedResponseMode(t *testing.T) {
+	_, base := startServer(t, entraConfig)
+	for _, mode := range []string{"form_post", "fragment"} {
+		u := entraAuthorizeURL(base, tidCorp, "iam", "&response_mode="+mode)
+		status, _, body := do(t, http.MethodGet, u, "", nil)
+		if status != http.StatusBadRequest || !strings.Contains(body, "invalid_request") || !strings.Contains(body, mode) {
+			t.Errorf("response_mode=%s: status %d body %s", mode, status, body)
+		}
+	}
+	u := entraAuthorizeURL(base, tidCorp, "iam", "&response_mode=query")
+	if status, _, _ := do(t, http.MethodGet, u, "", nil); status != http.StatusOK {
+		t.Errorf("response_mode=query: status %d", status)
 	}
 }
 

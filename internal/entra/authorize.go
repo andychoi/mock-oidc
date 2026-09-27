@@ -36,9 +36,17 @@ type codeStore struct {
 
 func newCodeStore() *codeStore { return &codeStore{codes: map[string]authCode{}} }
 
-func (s *codeStore) put(code string, c authCode) {
+// put stores a code and drops expired ones: abandoned sign-ins (refused
+// consent, injected errors, flows that stop at the redirect) are never taken,
+// so without this sweep the map would grow until restart.
+func (s *codeStore) put(code string, c authCode, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for k, v := range s.codes {
+		if v.expires.Before(now) {
+			delete(s.codes, k)
+		}
+	}
 	s.codes[code] = c
 }
 
@@ -100,6 +108,9 @@ func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
 	if !ar.ImpliesCodeFlow() {
 		return unsupportedResponseType(ar)
 	}
+	if rm := ar.ResponseMode; rm != "" && rm != "query" {
+		return unsupportedResponseMode(rm)
+	}
 	return renderPicker(pickerPage{Heading: "Pick an account", Action: req.URL.RequestURI(), Submit: "signin", Tenants: h.pickerTenants(sc)})
 }
 
@@ -110,6 +121,9 @@ func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response 
 	}
 	if !ar.ImpliesCodeFlow() {
 		return unsupportedResponseType(ar)
+	}
+	if rm := ar.ResponseMode; rm != "" && rm != "query" {
+		return unsupportedResponseMode(rm)
 	}
 	t, u, oerr := h.postedUser(req, sc)
 	if oerr != nil {
@@ -127,8 +141,9 @@ func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response 
 		return errorRedirect(ar.RedirectURI, ar.State, "consent_required",
 			"AADSTS65001: The user or administrator has not consented to use the application with ID '"+ar.ClientID+"'.")
 	}
+	now := h.now()
 	code := token.RandomAuthorizationCode()
-	h.codes.put(code, authCode{req: ar, tid: t.TID, username: u.Username, segment: sc.Segment, expires: h.now().Add(codeTTL)})
+	h.codes.put(code, authCode{req: ar, tid: t.TID, username: u.Username, segment: sc.Segment, expires: now.Add(codeTTL)}, now)
 	loc, oerr := ar.SuccessRedirectURL(code)
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
@@ -152,6 +167,14 @@ func (h *Handler) postedUser(req *oauth2.Request, sc scope) (*Tenant, *User, *oa
 func unsupportedResponseType(ar *oauth2.AuthRequest) routing.Response {
 	return errorRedirect(ar.RedirectURI, ar.State, "unsupported_response_type",
 		"AADSTS70005: response_type '"+strings.Join(ar.ResponseType, " ")+"' is not supported by the mock; use 'code'.")
+}
+
+// unsupportedResponseMode rejects response modes other than query with a 400
+// instead of an error redirect: a form_post client only accepts POST at the
+// redirect_uri, so it could not receive a GET error redirect either.
+func unsupportedResponseMode(mode string) routing.Response {
+	return routing.ErrorResponse(oauth2.InvalidRequest(
+		"AADSTS90005: response_mode '" + mode + "' is not supported by the mock; use 'query' or omit the parameter."))
 }
 
 // errorRedirect sends the browser back to the client with an OAuth error.
