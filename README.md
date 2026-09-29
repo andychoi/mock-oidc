@@ -52,7 +52,7 @@ services:
 
 ## Connection values (Issuer URL / Client ID / Client Secret)
 
-There is **no client registration and no admin UI** — the mock server accepts any
+There is **no client registration** — the mock server accepts any
 credentials you choose. To hook an app up, fill in these three values yourself:
 
 | Value | What to use | Rules |
@@ -90,6 +90,19 @@ resulting ID token carries `aud`, `groups`, and `tid` as documented below.
 | Userinfo | `http://localhost:8088/oidc/userinfo` |
 
 Issuer: `http://mock-oidc.dev.test:8088/oidc` (or `http://localhost:8088/oidc`).
+
+## Admin UI
+
+`http://localhost:8088/admin/` — a dependency-free dashboard (GitHub Primer
+theme, light/dark) served by the same process. Unauthenticated, like the rest
+of the server: it only renders what is already in the config files and the
+`/_entra` test API.
+
+- **Overview**: behavior flags, a clickable endpoint table for the root issuer
+  and every token-callback issuer, Entra KPIs when Entra mode is on.
+- **Entra** (only when configured): tenants, users (groups/AMR/admin/error
+  injection), consents, signing keys — with **Reset consents** and
+  **Rotate keys** buttons driving the same stores as the `/_entra` test API.
 
 ## Consumer configuration
 

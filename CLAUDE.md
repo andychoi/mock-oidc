@@ -11,6 +11,14 @@ Entra test tenant exists.
 1. Read the design: [`docs/entra/00-design.md`](docs/entra/00-design.md)
 2. Implement task by task: [`docs/entra/01-plan.md`](docs/entra/01-plan.md) (checkboxes track progress)
 
+## Admin UI (`internal/adminui`)
+
+Embedded single-page dashboard at `/admin/` (front routes `/admin` and `/admin/*`, GitHub Primer
+theme ported from ai-gateway's admin UI). Read-mostly: renders config/entra state and drives the
+same consent/key stores as the `/_entra` test API. Entra state flows through the
+`adminui.EntraState` interface (implemented by `*entra.Handler`) so `entra` never imports
+`adminui`/`config`. UI changes need no build step — edit `internal/adminui/static/` and restart.
+
 ## Rules
 
 - **Compatibility is a hard constraint.** Without Entra config, responses stay byte-for-byte identical

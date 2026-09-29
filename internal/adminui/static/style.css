@@ -1,0 +1,343 @@
+/* mock-oidc admin — GitHub Primer design language, the same port ai-gateway's
+   admin UI uses: token values benchmarked from primer/primitives and
+   @primer/css 22.3.1. Light is the default; dark follows prefers-color-scheme
+   unless the user pinned a theme via the header toggle (html[data-theme]),
+   which app.js persists in localStorage. */
+
+@font-face {
+  /* Mona Sans VF (opsz,wght axes), GitHub's UI typeface. OFL-1.1 — license
+     ships as mona-sans-OFL.txt. System stack below is the exact github.com
+     fallback, so nothing breaks if the font fails to load. */
+  font-family: "Mona Sans";
+  src: url("/admin/mona-sans-vf.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  /* --- color: canvas / fg / border (light) --- */
+  --canvas-default: #ffffff;
+  --canvas-subtle: #f6f8fa;
+  --canvas-inset: #f6f8fa;
+  --canvas-overlay: #ffffff;
+  --fg-default: #1f2328;
+  --fg-muted: #59636e;
+  --fg-subtle: #818b98;
+  --fg-onEmphasis: #ffffff;
+  --border-default: #d1d9e0;
+  --border-muted: rgba(209, 217, 224, 0.7);
+  --border-emphasis: #818b98;
+  /* --- color: functional (light) --- */
+  --accent-fg: #0969da;
+  --accent-emphasis: #0969da;
+  --accent-subtle: #ddf4ff;
+  --success-fg: #1a7f37;
+  --success-emphasis: #1f883d;
+  --success-subtle: #dafbe1;
+  --danger-fg: #d1242f;
+  --danger-emphasis: #cf222e;
+  --danger-subtle: #ffebe9;
+  --attention-fg: #9a6700;
+  --attention-subtle: #fff8c5;
+  --done-fg: #8250df;
+  --done-subtle: #fbefff;
+  --neutral-muted-bg: rgba(129, 139, 152, 0.12);
+  /* --- buttons / controls (light) --- */
+  --btn-bg: #f6f8fa;
+  --btn-hover-bg: #eff2f5;
+  --btn-active-bg: #e6eaef;
+  --btn-primary-bg: #1f883d;
+  --btn-primary-hover-bg: #1c8139;
+  --control-bg: #ffffff;
+  /* --- header (GitHub's global header is dark in both themes) --- */
+  --header-bg: #25292e;
+  --header-fg: rgba(255, 255, 255, 0.7);
+  --header-hover-fg: #ffffff;
+  --header-border: rgba(255, 255, 255, 0.12);
+  --underlineNav-active: #fd8c73; /* Primer's coral active-underline */
+  /* --- radii (functional/size/radius.json5) --- */
+  --radius-small: 3px;   /* badges, tags */
+  --radius-medium: 6px;  /* buttons, inputs, cards, popovers */
+  --radius-large: 12px;  /* dialogs, side panels */
+  --radius-full: 2em;    /* pill chips */
+  /* --- elevation --- */
+  --shadow-inset: inset 0 1px 0 rgba(31, 35, 40, 0.04);
+  --overlay-shadow: 0 8px 24px rgba(66, 74, 83, 0.12);
+  /* --- typography (functional/typography) --- */
+  --font-sans: "Mona Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+  :root:not([data-theme="light"]) {
+    --canvas-default: #0d1117;
+    --canvas-subtle: #151b23;
+    --canvas-inset: #010409;
+    --canvas-overlay: #151b23;
+    --fg-default: #f0f6fc;
+    --fg-muted: #9198a1;
+    --fg-subtle: #9198a1;
+    --border-default: #3d444d;
+    --border-muted: rgba(61, 68, 77, 0.7);
+    --border-emphasis: #656c76;
+    --accent-fg: #4493f8;
+    --accent-emphasis: #1f6feb;
+    --accent-subtle: rgba(56, 139, 253, 0.1);
+    --success-fg: #3fb950;
+    --success-emphasis: #238636;
+    --success-subtle: rgba(46, 160, 67, 0.15);
+    --danger-fg: #f85149;
+    --danger-emphasis: #da3633;
+    --danger-subtle: rgba(248, 81, 73, 0.1);
+    --attention-fg: #d29922;
+    --attention-subtle: rgba(187, 128, 9, 0.15);
+    --done-fg: #ab7df8;
+    --done-subtle: rgba(171, 125, 248, 0.15);
+    --neutral-muted-bg: rgba(101, 108, 118, 0.2);
+    --btn-bg: #212830;
+    --btn-hover-bg: #262c36;
+    --btn-active-bg: #2a313c;
+    --btn-primary-bg: #238636;
+    --btn-primary-hover-bg: #2ea043;
+    --control-bg: #010409;
+    --header-bg: #151b23;
+    --header-fg: rgba(255, 255, 255, 0.7);
+    --header-hover-fg: #ffffff;
+    --header-border: rgba(255, 255, 255, 0.12);
+    --shadow-inset: inset 0 1px 0 rgba(1, 4, 9, 0.24);
+    --overlay-shadow: 0 0 0 1px rgba(1, 4, 9, 0.6), 0 16px 32px rgba(1, 4, 9, 0.85);
+  }
+}
+
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="dark"] {
+  /* same sheet as the prefers-color-scheme block above; kept in sync so a
+     pinned dark theme works regardless of OS preference */
+  --canvas-default: #0d1117;
+  --canvas-subtle: #151b23;
+  --canvas-inset: #010409;
+  --canvas-overlay: #151b23;
+  --fg-default: #f0f6fc;
+  --fg-muted: #9198a1;
+  --fg-subtle: #9198a1;
+  --border-default: #3d444d;
+  --border-muted: rgba(61, 68, 77, 0.7);
+  --border-emphasis: #656c76;
+  --accent-fg: #4493f8;
+  --accent-emphasis: #1f6feb;
+  --accent-subtle: rgba(56, 139, 253, 0.1);
+  --success-fg: #3fb950;
+  --success-emphasis: #238636;
+  --success-subtle: rgba(46, 160, 67, 0.15);
+  --danger-fg: #f85149;
+  --danger-emphasis: #da3633;
+  --danger-subtle: rgba(248, 81, 73, 0.1);
+  --attention-fg: #d29922;
+  --attention-subtle: rgba(187, 128, 9, 0.15);
+  --done-fg: #ab7df8;
+  --done-subtle: rgba(171, 125, 248, 0.15);
+  --neutral-muted-bg: rgba(101, 108, 118, 0.2);
+  --btn-bg: #212830;
+  --btn-hover-bg: #262c36;
+  --btn-active-bg: #2a313c;
+  --btn-primary-bg: #238636;
+  --btn-primary-hover-bg: #2ea043;
+  --control-bg: #010409;
+  --header-bg: #151b23;
+  --header-fg: rgba(255, 255, 255, 0.7);
+  --header-hover-fg: #ffffff;
+  --header-border: rgba(255, 255, 255, 0.12);
+  --shadow-inset: inset 0 1px 0 rgba(1, 4, 9, 0.24);
+  --overlay-shadow: 0 0 0 1px rgba(1, 4, 9, 0.6), 0 16px 32px rgba(1, 4, 9, 0.85);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--canvas-default);
+  color: var(--fg-default);
+  font: 14px/1.5 var(--font-sans);
+}
+
+.hidden { display: none !important; }
+.dim { color: var(--fg-muted); }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+
+a { color: var(--accent-fg); }
+
+/* Primer focus treatment: 2px accent outline, pulled inside the box. */
+:focus-visible {
+  outline: 2px solid var(--accent-fg);
+  outline-offset: -2px;
+}
+
+/* ===== global header (GitHub dark header bar) ===== */
+
+header {
+  display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+  background: var(--header-bg); border-bottom: 1px solid var(--header-border);
+  position: sticky; top: 0; z-index: 10;
+}
+.brand {
+  color: #ffffff; font-weight: 600; font-size: 14px; letter-spacing: -0.1px;
+  display: flex; align-items: center; gap: 8px;
+}
+.brand .dim { color: var(--header-fg); font-weight: 400; }
+
+nav { display: flex; gap: 8px; flex: 1; flex-wrap: wrap; }
+nav a {
+  color: var(--header-fg); text-decoration: none; font-size: 14px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: var(--radius-medium);
+  border-bottom: 2px solid transparent;
+}
+nav a svg { opacity: 0.8; }
+nav a:hover { color: var(--header-hover-fg); background: rgba(255, 255, 255, 0.08); }
+nav a.active {
+  color: var(--header-hover-fg); font-weight: 600;
+  border-bottom-color: var(--underlineNav-active);
+}
+
+.header-right { display: flex; align-items: center; gap: 12px; }
+.health { font-size: 16px; line-height: 1; }
+.dot-on { color: var(--success-fg); }
+.dot-off { color: var(--danger-fg); }
+
+#theme-toggle {
+  background: transparent; border: 0; color: var(--header-fg);
+  padding: 4px; border-radius: var(--radius-medium); cursor: pointer;
+  display: inline-flex; align-items: center; line-height: 0;
+}
+#theme-toggle:hover { color: var(--header-hover-fg); background: rgba(255, 255, 255, 0.08); }
+
+/* ===== layout / headings ===== */
+
+main { padding: 24px 20px 48px; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 16px; }
+h2 {
+  font-size: 16px; font-weight: 600; margin: 24px 0 8px;
+  color: var(--fg-default);
+}
+.facts { color: var(--fg-muted); font-size: 12px; margin: 0 0 16px; }
+.facts .mono { font-size: 12px; }
+
+/* ===== cards (GitHub Box) ===== */
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.card {
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-medium);
+  box-shadow: var(--shadow-inset);
+  padding: 16px;
+}
+.card .label { color: var(--fg-muted); font-size: 14px; font-weight: 400; }
+.card .value {
+  font-size: 20px; font-weight: 600; margin-top: 4px;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+}
+
+/* ===== tables (GitHub Box-table) ===== */
+
+.table-wrap { overflow-x: auto; }
+table {
+  width: 100%; border-collapse: collapse;
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-medium);
+  overflow: hidden;
+}
+th, td {
+  padding: 8px; text-align: left;
+  border-bottom: 1px solid var(--border-muted); white-space: nowrap;
+  font-size: 14px;
+}
+th {
+  color: var(--fg-muted); font-size: 12px; font-weight: 600;
+  background: var(--canvas-subtle);
+}
+tbody tr:hover td { background: var(--canvas-subtle); }
+tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+td .sub { color: var(--fg-muted); font-size: 12px; }
+
+/* ===== chips (GitHub IssueLabel pill) ===== */
+
+.chip {
+  display: inline-block; padding: 0 7px; line-height: 18px;
+  border-radius: var(--radius-full); font-size: 12px; font-weight: 500;
+  border: 1px solid transparent; white-space: nowrap;
+  background: var(--neutral-muted-bg); color: var(--fg-muted);
+}
+.chip-on { background: var(--success-subtle); color: var(--success-fg); border-color: var(--success-emphasis); }
+.chip-off { background: var(--danger-subtle); color: var(--danger-fg); border-color: var(--danger-emphasis); }
+.chip-accent { background: var(--accent-subtle); color: var(--accent-fg); border-color: var(--accent-emphasis); }
+.chip-attention { background: var(--attention-subtle); color: var(--attention-fg); border-color: var(--attention-fg); }
+.chip-done { background: var(--done-subtle); color: var(--done-fg); border-color: var(--done-fg); }
+
+/* ===== buttons (Primer Button) ===== */
+
+.btn {
+  background: var(--btn-bg); color: var(--fg-default);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-medium);
+  padding: 5px 16px; cursor: pointer; font-size: 14px; font-weight: 500;
+  font-family: var(--font-sans); line-height: 20px;
+  box-shadow: var(--shadow-inset);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn:hover { background: var(--btn-hover-bg); border-color: var(--border-default); }
+.btn:active { background: var(--btn-active-bg); }
+.btn:disabled { color: var(--fg-muted); cursor: not-allowed; background: var(--btn-bg); opacity: 0.6; }
+.btn-primary {
+  background: var(--btn-primary-bg); border-color: rgba(31, 35, 40, 0.15);
+  color: var(--fg-onEmphasis); font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.btn-primary:hover { background: var(--btn-primary-hover-bg); border-color: rgba(31, 35, 40, 0.15); color: var(--fg-onEmphasis); }
+.btn-danger { color: var(--danger-fg); }
+.btn-danger:hover { background: var(--danger-subtle); border-color: var(--danger-emphasis); }
+.btn-sm { padding: 0 10px; font-size: 12px; line-height: 26px; }
+
+/* ===== panels / toolbar ===== */
+
+.panel {
+  background: var(--canvas-default);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-medium);
+  box-shadow: var(--shadow-inset);
+  padding: 16px;
+}
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+
+.error {
+  color: var(--danger-fg); margin: 8px 0; font-size: 12px;
+  background: var(--danger-subtle);
+  border: 1px solid var(--danger-emphasis);
+  border-radius: var(--radius-medium); padding: 8px 12px;
+}
+.loading, .empty { color: var(--fg-muted); padding: 24px; text-align: center; }
+
+/* ===== toast (Primer Toast) ===== */
+
+.toast {
+  position: fixed; bottom: 20px; right: 20px;
+  background: var(--canvas-default); color: var(--fg-default);
+  border-radius: var(--radius-medium);
+  box-shadow: inset 0 0 0 1px var(--border-default), var(--overlay-shadow);
+  z-index: 70; max-width: 420px; min-width: 280px;
+  display: flex; align-items: stretch; overflow: hidden;
+}
+.toast-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 48px; flex: none; color: var(--fg-onEmphasis);
+  background: var(--success-emphasis);
+}
+.toast-error .toast-icon { background: var(--danger-emphasis); }
+.toast-msg { padding: 16px; font-size: 14px; align-self: center; }

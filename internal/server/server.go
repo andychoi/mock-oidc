@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/andychoi/mock-oidc/internal/adminui"
 	"github.com/andychoi/mock-oidc/internal/config"
 	"github.com/andychoi/mock-oidc/internal/cors"
 	"github.com/andychoi/mock-oidc/internal/debugger"
@@ -30,6 +31,10 @@ import (
 // discoveryAlgs is the id_token_signing_alg_values_supported list emitted by
 // the upstream server (EC family first, then the RSA family incl. PS*).
 var discoveryAlgs = []string{"ES256", "ES384", "RS256", "RS384", "RS512", "PS256", "PS384", "PS512"}
+
+// entra.Handler serves the admin UI's Entra state through the accessor
+// interface (asserted here because entra itself cannot import adminui).
+var _ adminui.EntraState = (*entra.Handler)(nil)
 
 // Server wires everything together for one OAuth2Config.
 type Server struct {
@@ -161,10 +166,15 @@ func (s *Server) buildRouter() *routing.Router {
 	if s.ownBase != nil {
 		debugger.New(s.ownURL, func() *x509.CertPool { return s.trustPool }).Register(rt)
 	}
+	var entraState adminui.EntraState
 	if s.config.Entra != nil {
 		eh := entra.New(s.config.Entra)
+		entraState = eh
 		rt.AddFront("", eh.RoutePattern(), eh.Handle)
 	}
+	admin := adminui.New(s.config, entraState)
+	rt.AddFront("", "/admin", admin.Handle)
+	rt.AddFront("", "/admin/*", admin.Handle)
 	return rt
 }
 

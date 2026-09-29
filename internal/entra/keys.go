@@ -46,6 +46,18 @@ func (k *KeySet) ActiveKid() string {
 	return k.keys[len(k.keys)-1].Kid
 }
 
+// PublishedKids returns the kids of all published keys, oldest first (the
+// active key is last).
+func (k *KeySet) PublishedKids() []string {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	kids := make([]string, 0, len(k.keys))
+	for _, key := range k.keys {
+		kids = append(kids, key.Kid)
+	}
+	return kids
+}
+
 // Sign signs claims with the active key (typ JWT).
 func (k *KeySet) Sign(claims map[string]any) string {
 	k.mu.RLock()
