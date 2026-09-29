@@ -77,14 +77,15 @@ type pickerPage struct {
 // pickerTenants lists the accounts selectable in a scope: one tenant, or all
 // tenants for organizations/common.
 func (h *Handler) pickerTenants(sc scope) []pickerTenant {
+	cfg := h.conf()
 	var out []pickerTenant
-	for i := range h.cfg.Tenants {
-		t := &h.cfg.Tenants[i]
+	for i := range cfg.Tenants {
+		t := &cfg.Tenants[i]
 		if !sc.Multi() && t.TID != sc.Tenant.TID {
 			continue
 		}
 		pt := pickerTenant{TID: t.TID, Name: t.Name}
-		for _, u := range h.cfg.UsersIn(t.TID) {
+		for _, u := range cfg.UsersIn(t.TID) {
 			pt.Users = append(pt.Users, pickerUser{Username: u.Username, Name: u.Name, Email: u.Email})
 		}
 		out = append(out, pt)
@@ -154,14 +155,15 @@ func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response 
 // postedUser resolves the account chosen on the picker (form fields tid and
 // username) within the request scope. Shared with admin consent.
 func (h *Handler) postedUser(req *oauth2.Request, sc scope) (*Tenant, *User, *oauth2.Error) {
-	u := h.cfg.User(req.FormParam("tid"), req.FormParam("username"))
+	cfg := h.conf()
+	u := cfg.User(req.FormParam("tid"), req.FormParam("username"))
 	if u == nil {
 		return nil, nil, oauth2.InvalidRequest("AADSTS50034: The user account does not exist in this directory.")
 	}
 	if !sc.Multi() && u.TID != sc.Tenant.TID {
 		return nil, nil, oauth2.InvalidRequest("AADSTS50020: User account from tenant '" + u.TID + "' does not exist in tenant '" + sc.Tenant.TID + "'.")
 	}
-	return h.cfg.Tenant(u.TID), u, nil
+	return cfg.Tenant(u.TID), u, nil
 }
 
 func unsupportedResponseType(ar *oauth2.AuthRequest) routing.Response {

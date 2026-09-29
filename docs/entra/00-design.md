@@ -243,6 +243,24 @@ Validation (startup error): at least one tenant; `tid` is a GUID and unique; `ba
 non-empty and `tid` configured; user `username` non-empty, unique per tenant, `tid` configured;
 `error` ∈ `interaction_required|access_denied|invalid_grant`.
 
+### 5.1 Runtime mutation (admin UI)
+
+The parsed config seeds a copy-on-write store (`internal/entra/store.go`): every request reads one
+immutable snapshot (atomic load), admin mutations deep-copy, re-normalize (the same validation as
+startup, same error messages) and publish. Runtime edits are **in-memory only** — a restart returns
+to the config file, and the admin API's `POST /admin/api/entra/reset` restores the seed.
+
+Rules beyond startup validation: `tid` and `username` are immutable after create (rename =
+delete + create); deleting a tenant cascades its users and consents; the last tenant cannot be
+deleted; revoking a seeded consent removes it until the next reset (documented in the UI).
+
+Entra mode can also be toggled off at runtime (`POST /admin/api/settings {"name":"entra"}`). The
+route stays mounted (the router cannot un-register), but while disabled every `/{basePath}/...`
+request answers like an unrouted path: OPTIONS 204, anything else 405. **Deliberate divergence**:
+a server without Entra config would let e.g. `/{basePath}/{tid}/oauth2/v2.0/token` fall through
+to the navikt `/token` suffix route; the disabled gate returns 405 instead — safer, and
+"toggled off" is its own documented state, not "never configured".
+
 ## 6. Decisions
 
 | Decision | Why |

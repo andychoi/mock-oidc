@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/andychoi/mock-oidc/internal/config"
+	"github.com/andychoi/mock-oidc/internal/directory"
 	"github.com/andychoi/mock-oidc/internal/httpserver"
 	"github.com/andychoi/mock-oidc/internal/oauth2"
 	"github.com/andychoi/mock-oidc/internal/routing"
@@ -38,6 +39,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Login-page user directory: USER_DIRECTORY_PATH, defaulting to
+	// ./demo-users.json when present (the canonical directory file).
+	dirPath := os.Getenv("USER_DIRECTORY_PATH")
+	if dirPath == "" {
+		if _, statErr := os.Stat("demo-users.json"); statErr == nil {
+			dirPath = "demo-users.json"
+		}
+	}
+	var dir *directory.Directory
+	if dirPath != "" {
+		dir, err = directory.LoadFile(dirPath)
+		if err != nil {
+			slog.Error("failed to load user directory", "path", dirPath, "error", err)
+			os.Exit(1)
+		}
+	}
+
 	var tlsSetup *httpserver.TLS
 	if cfg.SSL != nil {
 		tlsSetup, err = httpserver.NewTLS(httpserver.Options{
@@ -56,7 +74,7 @@ func main() {
 	// in once the listener exists. The server reads it through this stable
 	// closure so reassignment below is visible.
 	ownBase := func() string { return "" }
-	srv := server.New(cfg, server.WithOwnBase(func() string { return ownBase() }))
+	srv := server.New(cfg, server.WithOwnBase(func() string { return ownBase() }), server.WithDirectory(dir))
 	srv.AddRouteFront(http.MethodGet, "/isalive", func(*oauth2.Request) routing.Response {
 		resp := routing.Response{Status: 200, Header: http.Header{}}
 		resp.Body = "alive and well"

@@ -25,6 +25,7 @@ label{display:block;font-size:.85rem;color:#555;margin-bottom:.3rem;font-weight:
 input{width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;font-size:.9rem;margin-bottom:.7rem}
 .s{width:100%;padding:.6rem;background:#0078d4;color:#fff;border:none;border-radius:4px;cursor:pointer}
 .lo{text-align:center;font-size:.8rem;color:#999;margin-top:.8rem}
+.lo b{color:#555}
 .lo a{color:#0078d4;cursor:pointer}
 </style>
 </head>
@@ -32,13 +33,13 @@ input{width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;font-size
 <div class="c">
 <h2>Mock OIDC AD — ACME</h2>
 <p class="sub">Dev SSO — pick a user or sign in manually (password: any value)</p>
-<div class="g" id="btns"></div>
-<div class="d">or sign in manually</div>
+<div class="g hidden" id="btns"></div>
+<div class="d hidden" id="div">or sign in manually</div>
 <form method="post" id="f">
 <label>Username</label>
-<input id="u" name="username" placeholder="e.g. andy, mary, kevin, admin">
+<input id="u" name="username" placeholder="e.g. andy, mary, kevin, admin" autocomplete="username">
 <label>Password</label>
-<input type="password" placeholder="any value">
+<input type="password" placeholder="any value" autocomplete="current-password">
 <input id="cl" name="claims" type="hidden">
 <button type="submit" class="s">Sign In</button>
 </form>
@@ -52,54 +53,64 @@ input{width:100%;padding:.5rem;border:1px solid #ccc;border-radius:4px;font-size
 //   gitea-*     → Gitea teams         (e.g. gitea-maintainers → maintainers team)
 //   acme-*      → org membership      (acme-employees, acme-admins)
 //   platform-*  → platform-wide       (platform-admins)
-// Per-project roles (owner/contributor of project X) are app data — manage in each app, not the IdP.
+// Per-project roles (owner/contributor of project X) are app data — manage them in each app, not the IdP.
 //
-// Canonical directory: demo-users.json (keep in sync — this array mirrors it).
-// [username, display_name, email, groups, css_class]
-var U=[
-['admin','Admin User','admin@demo.local',['platform-admins','dochub-admin'],'a'],
-['alice','Alice Park','alice@demo.local',['dochub-user','gitea-maintainers'],'u'],
-['bob','Bob Chen','bob@demo.local',['dochub-user','gitea-developers'],'u'],
-['eve','Eve Santos','eve@demo.local',['dochub-user','gitea-maintainers'],'u'],
-['frank','Frank Wu','frank@demo.local',['dochub-user','gitea-developers'],'u'],
-['grace','Grace Lee','grace@demo.local',[],'gs'],
-['mary','Mary Johnson','mary@acme.com',['acme-employees','dochub-user','gitea-developers'],'u'],
-['tim','Tim Miller','tim@acme.com',['acme-employees','dochub-user','gitea-developers'],'u'],
-['kevin','Kevin Park','kevin@acme.com',['acme-employees','dochub-user','gitea-maintainers'],'u'],
-['tom','Tom Anderson','tom@acme.com',['acme-employees','dochub-user','gitea-developers'],'u'],
-['mark','Mark Kim','mark@acme.com',['acme-employees','dochub-user','gitea-maintainers'],'u'],
-['andy','Andy Choi','andy@acme.com',['platform-admins','acme-admins','dochub-admin'],'a']
-];
+// Quick-picks are fetched live from the server's user directory
+// (maintained in the admin UI at /admin/, seeded from demo-users.json via
+// USER_DIRECTORY_PATH). Any username is still accepted manually.
+var TID='mock-tenant-id';
 var M={};
-var h='';
-for(var i=0;i<U.length;i++){
-var e=U[i],o={name:e[1],email:e[2],preferred_username:e[2],groups:e[3],tid:'mock-tenant-id'};
-M[e[0]]=o;
-var groups=e[3].length?e[3].join(', '):'guest';
-h+='<button type="button" class="b '+e[4]+'" data-i="'+i+'"><div class="n">'+e[0]+'</div><div class="r">'+groups+' — '+e[1]+'</div></button>';
+function claims(u){return {name:u.name||u.username,email:u.email||'',preferred_username:u.email||u.username,groups:u.groups||[],tid:TID};}
+function borderClass(groups){
+  if(!groups||!groups.length)return 'gs';
+  for(var i=0;i<groups.length;i++){if(/(^|-)admins?$/.test(groups[i]))return 'a';}
+  return 'u';
 }
-document.getElementById('btns').innerHTML=h;
-function doLogin(username,claims){
-document.getElementById('u').value=username;
-document.getElementById('cl').value=JSON.stringify(claims);
-try{localStorage.setItem('mock-sso-user',username)}catch(e){}
-document.getElementById('f').submit();
+function doLogin(username,c){
+  document.getElementById('u').value=username;
+  document.getElementById('cl').value=JSON.stringify(c);
+  try{localStorage.setItem('mock-sso-user',username)}catch(e){}
+  document.getElementById('f').submit();
 }
-document.getElementById('btns').onclick=function(ev){
-var b=ev.target.closest('.b');if(!b)return;
-var d=U[b.getAttribute('data-i')];
-doLogin(d[0],M[d[0]]);
-};
+// build quick-picks from the directory (text nodes only; no innerHTML)
+function draw(users){
+  var grid=document.getElementById('btns');
+  for(var i=0;i<users.length;i++){
+    var u=users[i];M[u.username]=claims(u);
+    var b=document.createElement('button');
+    b.type='button';b.className='b '+borderClass(u.groups);
+    var n=document.createElement('div');n.className='n';n.textContent=u.username;
+    var r=document.createElement('div');r.className='r';
+    r.textContent=(u.groups&&u.groups.length?u.groups.join(', '):'guest')+(u.name?' — '+u.name:'');
+    b.appendChild(n);b.appendChild(r);
+    b.addEventListener('click',function(ev){
+      var un=ev.currentTarget.getAttribute('data-un');
+      doLogin(un,M[un]);
+    });
+    b.setAttribute('data-un',u.username);
+    grid.appendChild(b);
+  }
+  if(users.length){
+    grid.classList.remove('hidden');
+    document.getElementById('div').classList.remove('hidden');
+  }
+}
+fetch('/admin/api/directory').then(function(r){return r.ok?r.json():[];}).then(draw).catch(function(){});
 document.getElementById('f').onsubmit=function(){
-var u=document.getElementById('u').value.trim();
-var c=M[u]||{name:u,email:u+'@demo.local',preferred_username:u+'@demo.local',groups:[],tid:'mock-tenant-id'};
-document.getElementById('cl').value=JSON.stringify(c);
-try{localStorage.setItem('mock-sso-user',u)}catch(e){}
+  var u=document.getElementById('u').value.trim();
+  var c=M[u]||{name:u,email:u+'@demo.local',preferred_username:u+'@demo.local',groups:[],tid:TID};
+  document.getElementById('cl').value=JSON.stringify(c);
+  try{localStorage.setItem('mock-sso-user',u)}catch(e){}
 };
 var saved;try{saved=localStorage.getItem('mock-sso-user')}catch(e){}
 if(saved){
-var el=document.getElementById('lo');
-el.innerHTML='Last signed in as <b>'+saved+'</b> — <a onclick="localStorage.removeItem(\'mock-sso-user\');location.reload()">forget</a>';
+  var lo=document.getElementById('lo');
+  var t1=document.createTextNode('Last signed in as ');
+  var b=document.createElement('b');b.textContent=saved;
+  var t2=document.createTextNode(' — ');
+  var a=document.createElement('a');a.textContent='forget';
+  a.addEventListener('click',function(){try{localStorage.removeItem('mock-sso-user')}catch(e){}location.reload();});
+  lo.appendChild(t1);lo.appendChild(b);lo.appendChild(t2);lo.appendChild(a);
 }
 </script>
 </body>

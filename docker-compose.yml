@@ -27,7 +27,9 @@ services:
       - ./mock-oidc.json:/config/mock-oidc.json:ro
       - ./mock-oidc-login.html:/config/mock-oidc-login.html:ro
       - ./entra-demo.json:/config/entra.json:ro
+      - ./demo-users.json:/config/demo-users.json:ro
     environment:
       - JSON_CONFIG_PATH=/config/mock-oidc.json
       - ENTRA_CONFIG_PATH=/config/entra.json
+      - USER_DIRECTORY_PATH=/config/demo-users.json
     restart: unless-stopped

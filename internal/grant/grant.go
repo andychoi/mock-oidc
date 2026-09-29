@@ -126,8 +126,9 @@ func TokenExchange(tp *token.TokenProvider) Handler {
 
 // Refresh validates the refresh token against the store (enqueued library
 // callbacks take priority), optionally rotates it, and issues new tokens.
-// nonce is not propagated on refresh, mirroring upstream.
-func Refresh(tp *token.TokenProvider, manager *RefreshTokenManager, rotate bool, enqueued func(issuerID string) token.Callback) Handler {
+// nonce is not propagated on refresh, mirroring upstream. rotate is resolved
+// per request so the admin UI can toggle it at runtime.
+func Refresh(tp *token.TokenProvider, manager *RefreshTokenManager, rotate func() bool, enqueued func(issuerID string) token.Callback) Handler {
 	return func(req *oauth2.Request, tr *oauth2.TokenRequest, issuerURL, issuerID string, _ token.Callback) routing.Response {
 		refreshToken := tr.RefreshToken
 
@@ -146,7 +147,7 @@ func Refresh(tp *token.TokenProvider, manager *RefreshTokenManager, rotate bool,
 			panic(oauth2.InvalidGrant("unknown refresh_token"))
 		}
 
-		if rotate {
+		if rotate != nil && rotate() {
 			refreshToken = manager.Rotate(refreshToken, resolved)
 		}
 

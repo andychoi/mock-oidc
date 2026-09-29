@@ -14,10 +14,14 @@ Entra test tenant exists.
 ## Admin UI (`internal/adminui`)
 
 Embedded single-page dashboard at `/admin/` (front routes `/admin` and `/admin/*`, GitHub Primer
-theme ported from ai-gateway's admin UI). Read-mostly: renders config/entra state and drives the
-same consent/key stores as the `/_entra` test API. Entra state flows through the
-`adminui.EntraState` interface (implemented by `*entra.Handler`) so `entra` never imports
-`adminui`/`config`. UI changes need no build step — edit `internal/adminui/static/` and restart.
+theme ported from ai-gateway's admin UI). Maintains runtime state: entra tenants/users via the
+copy-on-write `entra.Store` (mutations re-run `Config.normalize`, so runtime edits keep every
+startup invariant), consent revoke/reset, key rotation, the login directory
+(`internal/directory`, seeded from `USER_DIRECTORY_PATH`/`demo-users.json`), and server settings
+toggles (interactiveLogin, rotateRefreshToken, entra on/off — atomics on `*server.Server`, the
+entra toggle gates the front route with 405s). All edits are in-memory; resets restore the
+config-file seed. `adminui` imports `entra`/`directory` directly; `entra` still imports neither
+`adminui` nor `config`. UI changes need no build step — edit `internal/adminui/static/` and restart.
 
 ## Rules
 

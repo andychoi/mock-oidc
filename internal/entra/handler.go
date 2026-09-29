@@ -13,7 +13,8 @@ import (
 
 // Handler serves every Entra mode endpoint under /{basePath}/.
 type Handler struct {
-	cfg      *Config
+	seed     *Config // the immutable startup config (basePath, consent seed)
+	store    *Store  // the mutable configuration (copy-on-write snapshots)
 	keys     *KeySet
 	consents *ConsentStore
 	codes    *codeStore
@@ -28,15 +29,19 @@ func WithClock(now func() time.Time) Option { return func(h *Handler) { h.now = 
 
 // New builds a handler for a parsed config.
 func New(cfg *Config, opts ...Option) *Handler {
-	h := &Handler{cfg: cfg, keys: NewKeySet(), consents: NewConsentStore(cfg.Consents), codes: newCodeStore(), now: time.Now}
+	h := &Handler{seed: cfg, store: NewStore(cfg), keys: NewKeySet(), consents: NewConsentStore(cfg.Consents), codes: newCodeStore(), now: time.Now}
 	for _, o := range opts {
 		o(h)
 	}
 	return h
 }
 
+// conf returns the current configuration snapshot; take one local per
+// request so a concurrent publish cannot tear the read.
+func (h *Handler) conf() *Config { return h.store.Snapshot() }
+
 // RoutePattern is the router path for AddFront: every path under /{basePath}/.
-func (h *Handler) RoutePattern() string { return "/" + h.cfg.BasePath + "/*" }
+func (h *Handler) RoutePattern() string { return "/" + h.seed.BasePath + "/*" }
 
 // scope is the tenant segment of a request: one configured tenant, or the
 // multi-tenant organizations/common endpoints (Tenant == nil).
@@ -95,7 +100,7 @@ func (h *Handler) resolveScope(seg string) (scope, *oauth2.Error) {
 	if seg == ScopeOrganizations || seg == ScopeCommon {
 		return scope{Segment: seg}, nil
 	}
-	if t := h.cfg.Tenant(seg); t != nil {
+	if t := h.conf().Tenant(seg); t != nil {
 		return scope{Segment: t.TID, Tenant: t}, nil
 	}
 	return scope{}, oauth2.InvalidRequest("AADSTS90002: Tenant '" + seg + "' not found.")
@@ -109,7 +114,7 @@ func origin(req *oauth2.Request) string {
 }
 
 func (h *Handler) discovery(req *oauth2.Request, sc scope) routing.Response {
-	base := origin(req) + "/" + h.cfg.BasePath
+	base := origin(req) + "/" + h.conf().BasePath
 	issuerTID := "{tenantid}"
 	if !sc.Multi() {
 		issuerTID = sc.Tenant.TID

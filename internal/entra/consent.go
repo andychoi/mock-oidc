@@ -48,6 +48,25 @@ func (s *ConsentStore) Reset() {
 	}
 }
 
+// Remove drops one consent (admin revoke).
+func (s *ConsentStore) Remove(clientID, tid string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.granted, consentKey(clientID, tid))
+}
+
+// RemoveTenant drops every consent of a tenant (tenant cascade).
+func (s *ConsentStore) RemoveTenant(tid string) {
+	tid = strings.ToLower(tid)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k := range s.granted {
+		if strings.HasSuffix(k, "|"+tid) {
+			delete(s.granted, k)
+		}
+	}
+}
+
 // List returns the consents sorted by tenant, then client ID.
 func (s *ConsentStore) List() []Consent {
 	s.mu.RLock()

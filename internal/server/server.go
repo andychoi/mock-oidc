@@ -5,6 +5,8 @@ package server
 
 import (
 	"crypto/x509"
+	"errors"
+	"fmt"
 	"mime"
 	"net/http"
 	"net/url"
@@ -12,11 +14,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/andychoi/mock-oidc/internal/adminui"
 	"github.com/andychoi/mock-oidc/internal/config"
 	"github.com/andychoi/mock-oidc/internal/cors"
 	"github.com/andychoi/mock-oidc/internal/debugger"
+	"github.com/andychoi/mock-oidc/internal/directory"
 	"github.com/andychoi/mock-oidc/internal/entra"
 	"github.com/andychoi/mock-oidc/internal/grant"
 	"github.com/andychoi/mock-oidc/internal/introspect"
@@ -32,10 +36,6 @@ import (
 // the upstream server (EC family first, then the RSA family incl. PS*).
 var discoveryAlgs = []string{"ES256", "ES384", "RS256", "RS384", "RS512", "PS256", "PS384", "PS512"}
 
-// entra.Handler serves the admin UI's Entra state through the accessor
-// interface (asserted here because entra itself cannot import adminui).
-var _ adminui.EntraState = (*entra.Handler)(nil)
-
 // Server wires everything together for one OAuth2Config.
 type Server struct {
 	config    *config.OAuth2Config
@@ -46,6 +46,14 @@ type Server struct {
 	grants    map[string]grant.Handler
 	callbacks callbackQueue
 	router    *routing.Router
+
+	// settings are the admin-tunable runtime flags; initialized from the
+	// config so the defaults are byte-identical to a config-only server.
+	settings runtimeSettings
+	// entra is the Entra mode handler (nil when not configured).
+	entra *entra.Handler
+	// dir is the navikt login-page directory (nil = manual login only).
+	dir *directory.Directory
 
 	// ownBase resolves the server's own bound base URL for the debugger's
 	// server-to-server token exchange (nil disables the debugger).
@@ -62,6 +70,17 @@ func WithOwnBase(fn func() string) Option { return func(s *Server) { s.ownBase =
 
 // WithTrustPool sets the server's own TLS trust pool (self or keystore cert).
 func WithTrustPool(pool *x509.CertPool) Option { return func(s *Server) { s.trustPool = pool } }
+
+// WithDirectory sets the navikt login-page user directory.
+func WithDirectory(d *directory.Directory) Option { return func(s *Server) { s.dir = d } }
+
+// runtimeSettings holds the admin-tunable flags (atomic: written by the
+// admin API, read on request paths).
+type runtimeSettings struct {
+	interactiveLogin   atomic.Bool
+	rotateRefreshToken atomic.Bool
+	entraEnabled       atomic.Bool
+}
 
 // callbackQueue mirrors the LinkedBlockingQueue peek/poll-by-issuer behavior.
 type callbackQueue struct {
@@ -101,12 +120,15 @@ func New(cfg *config.OAuth2Config, opts ...Option) *Server {
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.settings.interactiveLogin.Store(cfg.InteractiveLogin)
+	s.settings.rotateRefreshToken.Store(cfg.RotateRefreshToken)
+	s.settings.entraEnabled.Store(cfg.Entra != nil)
 	s.grants = map[string]grant.Handler{
 		oauth2.GrantAuthorizationCode: s.authCode.TokenResponse,
 		oauth2.GrantClientCredentials: grant.ClientCredentials(s.tp),
 		oauth2.GrantJWTBearer:         grant.JWTBearer(s.tp),
 		oauth2.GrantTokenExchange:     grant.TokenExchange(s.tp),
-		oauth2.GrantRefreshToken:      grant.Refresh(s.tp, refresh, cfg.RotateRefreshToken, s.callbacks.pollIfIssuerMatches),
+		oauth2.GrantRefreshToken:      grant.Refresh(s.tp, refresh, s.settings.rotateRefreshToken.Load, s.callbacks.pollIfIssuerMatches),
 		oauth2.GrantPassword:          grant.Password(s.tp),
 	}
 	s.router = s.buildRouter()
@@ -166,17 +188,64 @@ func (s *Server) buildRouter() *routing.Router {
 	if s.ownBase != nil {
 		debugger.New(s.ownURL, func() *x509.CertPool { return s.trustPool }).Register(rt)
 	}
-	var entraState adminui.EntraState
 	if s.config.Entra != nil {
 		eh := entra.New(s.config.Entra)
-		entraState = eh
-		rt.AddFront("", eh.RoutePattern(), eh.Handle)
+		s.entra = eh
+		rt.AddFront("", eh.RoutePattern(), s.gateEntra(eh))
 	}
-	admin := adminui.New(s.config, entraState)
+	admin := adminui.New(s.config, s.entra, s.dir, s)
 	rt.AddFront("", "/admin", admin.Handle)
 	rt.AddFront("", "/admin/*", admin.Handle)
 	return rt
 }
+
+// gateEntra dispatches to the Entra handler only while the runtime toggle is
+// on. When off it answers like an unrouted path: OPTIONS 204, everything
+// else 405. (Deliberate divergence: an unconfigured server would let e.g.
+// /entra/{tid}/.../token fall through to the navikt /token suffix route; the
+// disabled gate returns 405 instead — safer, and toggle-off is documented as
+// its own state. See docs/entra/00-design.md §6.)
+func (s *Server) gateEntra(eh *entra.Handler) routing.Handler {
+	return func(req *oauth2.Request) routing.Response {
+		if !s.settings.entraEnabled.Load() {
+			if req.Method == http.MethodOptions {
+				return routing.Response{Status: http.StatusNoContent, Header: http.Header{}}
+			}
+			return routing.MethodNotAllowed()
+		}
+		return eh.Handle(req)
+	}
+}
+
+// AdminSettings renders the live runtime toggles (adminui.Settings).
+func (s *Server) AdminSettings() adminui.AdminSettings {
+	return adminui.AdminSettings{
+		InteractiveLogin:   s.settings.interactiveLogin.Load(),
+		RotateRefreshToken: s.settings.rotateRefreshToken.Load(),
+		EntraConfigured:    s.config.Entra != nil,
+		EntraEnabled:       s.settings.entraEnabled.Load(),
+	}
+}
+
+// AdminSetSetting flips one runtime toggle by name.
+func (s *Server) AdminSetSetting(name string, value bool) error {
+	switch name {
+	case "interactiveLogin":
+		s.settings.interactiveLogin.Store(value)
+	case "rotateRefreshToken":
+		s.settings.rotateRefreshToken.Store(value)
+	case "entra":
+		if s.config.Entra == nil {
+			return errEntraNotConfigured
+		}
+		s.settings.entraEnabled.Store(value)
+	default:
+		return fmt.Errorf("unknown setting %q", name)
+	}
+	return nil
+}
+
+var errEntraNotConfigured = errors.New("entra mode is not configured for this server")
 
 // SetOwnBase replaces the own-base resolver; call before serving starts.
 func (s *Server) SetOwnBase(fn func() string) { s.ownBase = fn }
@@ -232,7 +301,7 @@ func (s *Server) authorizeGet(req *oauth2.Request) routing.Response {
 	if err != nil {
 		panic(err)
 	}
-	if s.config.InteractiveLogin || ar.IsPrompt() {
+	if s.settings.interactiveLogin.Load() || ar.IsPrompt() {
 		html, oerr := s.login.LoginHTML(req)
 		if oerr != nil {
 			panic(oerr)

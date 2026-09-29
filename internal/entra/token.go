@@ -38,18 +38,19 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	if !pkceOK(c.req, tr.CodeVerifier) {
 		return invalidGrant("AADSTS501481: The Code_Verifier does not match the code_challenge supplied in the authorization request.")
 	}
-	t := h.cfg.Tenant(c.tid)
-	u := h.cfg.User(c.tid, c.username)
+	cfg := h.conf()
+	t := cfg.Tenant(c.tid)
+	u := cfg.User(c.tid, c.username)
 	if u.Error == ErrInvalidGrant {
 		return invalidGrant("AADSTS50057: The user account is disabled.")
 	}
-	in := TokenInput{Origin: origin(req), BasePath: h.cfg.BasePath, Tenant: t, User: u, ClientID: c.req.ClientID,
-		Nonce: c.req.Nonce, Scopes: c.req.Scope, Now: h.now(), Expiry: h.cfg.TokenExpiry}
+	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, Tenant: t, User: u, ClientID: c.req.ClientID,
+		Nonce: c.req.Nonce, Scopes: c.req.Scope, Now: h.now(), Expiry: cfg.TokenExpiry}
 	resp := jsonx.Obj{
 		{Name: "token_type", V: "Bearer"},
 		{Name: "scope", V: strings.Join(c.req.Scope, " ")},
-		{Name: "expires_in", V: h.cfg.TokenExpiry},
-		{Name: "ext_expires_in", V: h.cfg.TokenExpiry},
+		{Name: "expires_in", V: cfg.TokenExpiry},
+		{Name: "ext_expires_in", V: cfg.TokenExpiry},
 		{Name: "access_token", V: h.keys.Sign(AccessTokenClaims(in))},
 	}
 	if hasScope(c.req.Scope, "offline_access") {

@@ -95,14 +95,23 @@ Issuer: `http://mock-oidc.dev.test:8088/oidc` (or `http://localhost:8088/oidc`).
 
 `http://localhost:8088/admin/` — a dependency-free dashboard (GitHub Primer
 theme, light/dark) served by the same process. Unauthenticated, like the rest
-of the server: it only renders what is already in the config files and the
-`/_entra` test API.
+of the server; its mutations change in-memory state only (a restart returns to
+the config files, and every page has a reset-to-seed action).
 
-- **Overview**: behavior flags, a clickable endpoint table for the root issuer
-  and every token-callback issuer, Entra KPIs when Entra mode is on.
-- **Entra** (only when configured): tenants, users (groups/AMR/admin/error
-  injection), consents, signing keys — with **Reset consents** and
-  **Rotate keys** buttons driving the same stores as the `/_entra` test API.
+- **Overview**: server KPIs, a clickable endpoint table for the root issuer
+  and every token-callback issuer, and runtime **settings toggles** —
+  interactive login, refresh-token rotation, and Entra mode on/off.
+- **Entra** (only when configured): full CRUD for **tenants and users**
+  (drawer forms, same validation as the config file), consents with per-row
+  revoke, signing keys with rotation, and **Reset to config**.
+- **Directory**: the navikt login page quick-picks. Maintained here and
+  rendered live by the custom login page; seeded from `demo-users.json` via
+  `USER_DIRECTORY_PATH` (set in docker-compose; defaults to `./demo-users.json`
+  when present). Any username is still accepted on the login page itself.
+
+The admin JSON API lives under `/admin/api/` (`settings`, `entra`,
+`entra/tenants`, `entra/users`, `entra/consents`, `directory`); see
+`internal/adminui/adminui.go` for the surface.
 
 ## Consumer configuration
 

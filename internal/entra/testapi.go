@@ -25,13 +25,14 @@ func (h *Handler) testAPI(req *oauth2.Request, action string) routing.Response {
 	case post && action == "rotate-keys":
 		return routing.JSON(jsonx.Obj{{Name: "kid", V: h.keys.Rotate()}})
 	case get && action == "groups":
-		t := h.cfg.Tenant(req.QueryParam("tid"))
+		cfg := h.conf()
+		t := cfg.Tenant(req.QueryParam("tid"))
 		if t == nil {
 			return routing.ErrorResponse(oauth2.InvalidRequest("AADSTS90002: Tenant '" + req.QueryParam("tid") + "' not found."))
 		}
 		seen := map[string]bool{}
 		var names []string
-		for _, u := range h.cfg.UsersIn(t.TID) {
+		for _, u := range cfg.UsersIn(t.TID) {
 			for _, g := range u.Groups {
 				if !seen[g] {
 					seen[g] = true
