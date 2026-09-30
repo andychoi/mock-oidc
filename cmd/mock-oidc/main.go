@@ -1,10 +1,10 @@
 // Command mock-oidc is the standalone mock OIDC server (the Go equivalent of
 // StandaloneMockOAuth2Server.kt): env-based config, /isalive route, optional
-// TLS from httpServer.ssl in the config.
+// TLS from httpServer.ssl in the config (PEM pair or PKCS12 keystore). With
+// TLS the port serves HTTPS and plain HTTP alike (dual sniffing listener).
 package main
 
 import (
-	"crypto/tls"
 	"log/slog"
 	"net"
 	"net/http"
@@ -63,6 +63,8 @@ func main() {
 			KeystoreFile:     cfg.SSL.KeystoreFile,
 			KeystoreType:     cfg.SSL.KeystoreType,
 			KeystorePassword: cfg.SSL.KeystorePassword,
+			CertFile:         cfg.SSL.CertificateFile,
+			KeyFile:          cfg.SSL.PrivateKeyFile,
 		})
 		if err != nil {
 			slog.Error("failed to configure TLS", "error", err)
@@ -90,14 +92,16 @@ func main() {
 	bindHost, bindPort, _ := net.SplitHostPort(ln.Addr().String())
 	scheme := "http"
 	if tlsSetup != nil {
-		ln = tls.NewListener(ln, tlsSetup.Config)
+		// Dual-protocol: HTTPS + plain HTTP on the same port; the server's
+		// ReadHeaderTimeout bounds the sniff peek and the TLS handshake.
+		ln = httpserver.Dual(ln, tlsSetup.Config)
 		scheme = "https"
 		srv.SetTrustPool(tlsSetup.TrustPool())
 	}
 	base := scheme + "://" + net.JoinHostPort(loopbackIfWildcard(bindHost), bindPort)
 	ownBase = func() string { return base }
 
-	httpSrv := &http.Server{Handler: srv.Handler()}
+	httpSrv := httpserver.NewServer(srv.Handler())
 	go func() {
 		slog.Info("starting mock-oidc", "addr", addr, "base", base,
 			"interactiveLogin", cfg.InteractiveLogin, "tls", tlsSetup != nil)

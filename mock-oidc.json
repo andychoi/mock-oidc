@@ -1,7 +1,12 @@
 {
   "interactiveLogin": true,
   "loginPagePath": "/config/mock-oidc-login.html",
-  "httpServer": "NettyWrapper",
+  "httpServer": {
+    "ssl": {
+      "certificateFile": "/config/tls/oidc.dev.test.pem",
+      "privateKeyFile": "/config/tls/oidc.dev.test-key.pem"
+    }
+  },
   "tokenCallbacks": [
     {
       "issuerId": "oidc",

@@ -9,22 +9,26 @@ JWKS (including the deterministic initial keys), grant behavior and error
 responses are byte-for-byte compatible with 6.0.2; the rewrite plan and the
 compatibility contract live in [docs/plan](docs/plan/00-overview.md).
 
-Runs standalone on host port **8088**, independent of any project's Docker network —
-apps reach it like an external IdP, mirroring production.
+Runs standalone at **https://oidc.dev.test** (port 443), independent of any project's
+Docker network — apps reach it like an external IdP, mirroring production. TLS
+terminates in the server itself from a mkcert certificate (the ai-gateway pattern),
+and the one listener serves plain HTTP DUAL — port **8088** stays up for legacy
+consumers (`http://mock-oidc.dev.test:8088`).
 
 ```
-image: built from this repo (docker compose up -d --build)
+image: built from this repo (see Quick start)
 parity reference: ghcr.io/navikt/mock-oauth2-server:6.0.2
 ```
 
 ## Quick start
 
 ```bash
-docker compose up -d
-# IdP listens on http://localhost:8088
+make tls   # once per clone: mkcert cert into ./tls (gitignored; `mkcert -install` once per machine)
+docker compose -p infra-apps -f ../infra-apps/compose.yaml up -d --build mock-oidc
+# IdP listens on https://oidc.dev.test (443) — plain http://localhost:8088 still served
 ```
 
-### Hostname setup (`mock-oidc.dev.test` — host + Docker)
+### Hostname setup (`oidc.dev.test` — host + Docker)
 
 One hostname for the IdP means the issuer URL, browser redirects, and the `iss`
 claim are identical whether the consumer runs on the host or in a container.
@@ -33,7 +37,7 @@ claim are identical whether the consumer runs on the host or in a container.
 
 ```
 # /etc/hosts
-127.0.0.1 mock-oidc.dev.test
+127.0.0.1 oidc.dev.test mock-oidc.dev.test
 ```
 
 **Dockerized consumers** — containers cannot see the host's `/etc/hosts`, so map
@@ -43,12 +47,12 @@ the name to the host gateway in each consumer's `docker-compose.yml`:
 services:
   app:
     extra_hosts:
-      - "mock-oidc.dev.test:host-gateway"
+      - "oidc.dev.test:host-gateway"
 ```
 
 `host-gateway` is Docker's alias for the host (Docker Desktop maps it to
 `host.docker.internal`). Without this line containers fail with
-`bad address` for `mock-oidc.dev.test`.
+`bad address` for `oidc.dev.test`.
 
 ## Connection values (Issuer URL / Client ID / Client Secret)
 
@@ -57,7 +61,7 @@ credentials you choose. To hook an app up, fill in these three values yourself:
 
 | Value | What to use | Rules |
 |---|---|---|
-| **Issuer URL** | `http://mock-oidc.dev.test:8088/oidc` (or `http://localhost:8088/oidc` without the `/etc/hosts` entry) | The **last path segment defines the issuer** — any path works, but `/oidc` is the convention. Use one hostname consistently; the server echoes it back as `iss`. |
+| **Issuer URL** | `https://oidc.dev.test/oidc` (canonical, TLS; `http://localhost:8088/oidc` without any `/etc/hosts` entry) | The **last path segment defines the issuer** — any path works, but `/oidc` is the convention. Use one hostname consistently; the server echoes it back as `iss`. |
 | **Client ID** | Your app's name, e.g. `dochub`, `signflow` | Any non-empty string. It is echoed back as the token's `aud` claim. |
 | **Client Secret** | `<app>-dev-secret`, e.g. `dochub-dev-secret` | Any string — the token endpoint accepts arbitrary client credentials (Basic auth or form body). |
 | **Redirect URI** | e.g. `http://localhost:3000/api/auth/oidc/callback` | Any URI your app serves. Must be **identical** in the authorize request and the token exchange. |
@@ -72,8 +76,8 @@ Your app fetches all other endpoints (authorize/token/jwks/userinfo) from that
 discovery document — no further URLs to configure.
 
 Running the consumer **inside Docker**? Containers can't resolve
-`mock-oidc.dev.test` on their own — add the `extra_hosts` line from
-[Hostname setup](#hostname-setup-mock-oidc-devtest--host--docker) below.
+`oidc.dev.test` on their own — add the `extra_hosts` line from
+[Hostname setup](#hostname-setup-oidcdevtest--host--docker) below.
 
 Verified live against 6.0.2: a full authorization-code flow with made-up
 `client_id=verify-any-client` / `secret=not-a-real-secret` succeeds, and the
@@ -83,17 +87,28 @@ resulting ID token carries `aud`, `groups`, and `tid` as documented below.
 
 | Endpoint | URL |
 |---|---|
-| Discovery | `http://localhost:8088/oidc/.well-known/openid-configuration` |
-| Authorize (interactive login) | `http://localhost:8088/oidc/authorize` |
-| Token | `http://localhost:8088/oidc/token` |
-| JWKS | `http://localhost:8088/oidc/jwks` |
-| Userinfo | `http://localhost:8088/oidc/userinfo` |
+| Discovery | `https://oidc.dev.test/oidc/.well-known/openid-configuration` |
+| Authorize (interactive login) | `https://oidc.dev.test/oidc/authorize` |
+| Token | `https://oidc.dev.test/oidc/token` |
+| JWKS | `https://oidc.dev.test/oidc/jwks` |
+| Userinfo | `https://oidc.dev.test/oidc/userinfo` |
 
-Issuer: `http://mock-oidc.dev.test:8088/oidc` (or `http://localhost:8088/oidc`).
+Issuer: `https://oidc.dev.test/oidc` (legacy: `http://localhost:8088/oidc`).
+
+## TLS
+
+HTTPS is the ai-gateway pattern: a **mkcert** PEM pair in `./tls/` (gitignored —
+`make tls` regenerates; SANs cover `oidc.dev.test`, the legacy
+`mock-oidc.dev.test`, `localhost`, and both loopback IPs), wired through the
+`httpServer.ssl.certificateFile` / `privateKeyFile` config block. The server
+serves HTTPS and plain HTTP **on the same listener** (first-byte sniffing), so
+`http://localhost:8088` keeps working for anything not yet migrated. A missing
+or bad cert/key is a fatal boot error, never a silent HTTP-only fallback.
 
 ## Admin UI
 
-`http://localhost:8088/admin/` — a dependency-free dashboard (GitHub Primer
+`https://oidc.dev.test/admin/` (or `http://localhost:8088/admin/`) — a
+dependency-free dashboard (GitHub Primer
 theme, light/dark) served by the same process. Unauthenticated, like the rest
 of the server; its mutations change in-memory state only (a restart returns to
 the config files, and every page has a reset-to-seed action).
@@ -116,7 +131,7 @@ The admin JSON API lives under `/admin/api/` (`settings`, `entra`,
 ## Consumer configuration
 
 ```env
-OIDC_ISSUER_URL=http://mock-oidc.dev.test:8088/oidc
+OIDC_ISSUER_URL=https://oidc.dev.test/oidc
 OIDC_CLIENT_ID=dochub            # any value; interactive login accepts all clients
 OIDC_CLIENT_SECRET=dochub-dev-secret
 OIDC_REDIRECT_URI=http://<app-host>/api/auth/oidc/callback
@@ -134,7 +149,7 @@ the JSON config. With neither, the server behaves exactly as before.
 
 | Value | Per tenant | "Sign in with Microsoft" (multi-tenant) |
 |---|---|---|
-| Authority (issuer base) | `http://mock-oidc.dev.test:8088/entra/{tid}/v2.0` | `http://mock-oidc.dev.test:8088/entra/organizations/v2.0` |
+| Authority (issuer base) | `https://oidc.dev.test/entra/{tid}/v2.0` | `https://oidc.dev.test/entra/organizations/v2.0` |
 | Discovery | `…/entra/{tid}/v2.0/.well-known/openid-configuration` | `issuer` is the template `…/entra/{tenantid}/v2.0` |
 | Token `iss` | `…/entra/{tid}/v2.0` | `…/entra/{user's tid}/v2.0` |
 | Client ID / secret | any | any |
@@ -191,7 +206,7 @@ app's own DB/seed scripts, not in the IdP (identity only, same as production Azu
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | Service definition (Go build, port 8088 → 8080) |
+| `docker-compose.yml` | Service definition (Go build, 443 + 8088 → 8080; TLS + legacy HTTP) |
 | `docker-compose.upstream.yml` | Rollback to the upstream 6.0.2 image |
 | `mock-oidc.json` | Server config (interactive login, token callback sets `tid` on issuer `oidc`) |
 | `mock-oidc-login.html` | Custom login page with user quick-picks |
@@ -212,7 +227,8 @@ app's own DB/seed scripts, not in the IdP (identity only, same as production Azu
 go test ./...                       # unit + e2e suites (server on random ports)
 go run ./cmd/mock-oidc              # run locally (falls back to ./config.json or JSON_CONFIG env)
 JSON_CONFIG='{"interactiveLogin":true}' SERVER_PORT=8099 go run ./cmd/mock-oidc
-docker compose up -d --build        # rebuild and restart the shared instance
+docker compose -p infra-apps -f ../infra-apps/compose.yaml up -d --build mock-oidc
+                                    # rebuild and restart the shared instance
 ```
 
 Config precedence is `JSON_CONFIG` env → `JSON_CONFIG_PATH` (default

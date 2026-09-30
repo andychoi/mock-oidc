@@ -41,5 +41,9 @@ config-file seed. `adminui` imports `entra`/`directory` directly; `entra` still 
 ```bash
 go test ./...                     # all tests
 go test ./internal/e2e/ -run Entra -v
-docker compose up -d --build      # serves http://mock-oidc.dev.test:8088
+docker compose -p infra-apps -f ../infra-apps/compose.yaml up -d --build mock-oidc
+                                  # serves https://oidc.dev.test (TLS, make tls first;
+                                  # legacy http://mock-oidc.dev.test:8088 still served)
+                                  # (infra-apps umbrella project — never a bare
+                                  # `docker compose up` here)
 ```

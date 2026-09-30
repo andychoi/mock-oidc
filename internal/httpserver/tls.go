@@ -1,6 +1,8 @@
 // Package httpserver builds the TLS configuration for the standalone server:
-// a self-signed localhost certificate when no keystore is configured
-// (mirroring Ssl.kt), or a user-provided PKCS12 keystore.
+// a self-signed localhost certificate when no certificate source is
+// configured (mirroring Ssl.kt), a user-provided PKCS12 keystore, or a PEM
+// certificate/key pair (mkcert-style local-CA certificates — the ai-gateway
+// deploy pattern).
 package httpserver
 
 import (
@@ -27,33 +29,50 @@ type TLS struct {
 	Certificates []*x509.Certificate
 }
 
-// Options mirrors the Kotlin SslConfig JSON shape.
+// Options mirrors the Kotlin SslConfig JSON shape, extended with a PEM
+// certificate/key pair for mkcert-style local-CA certificates.
 type Options struct {
 	KeyPassword      string
 	KeystoreFile     string
 	KeystoreType     string // "PKCS12" (default); "JKS" is rejected
 	KeystorePassword string
+	// CertFile + KeyFile load a PEM certificate chain and private key
+	// directly. Mutually exclusive with KeystoreFile, and the two must be
+	// set together — an ambiguous or partial certificate source is a fatal
+	// config error, never a silent fallback to self-signed.
+	CertFile string
+	KeyFile  string
 }
 
-// NewTLS builds the TLS setup. When KeystoreFile is empty a self-signed
-// certificate for localhost/127.0.0.1 is generated (RSA 2048, SHA256withRSA,
-// 365 days — the same shape as SslKeystore.generate).
+// NewTLS builds the TLS setup: a PEM pair when certificateFile/privateKeyFile
+// are configured, else the PKCS12 keystore, else a self-signed certificate
+// for localhost/127.0.0.1 (RSA 2048, SHA256withRSA, 365 days — the same shape
+// as SslKeystore.generate).
 func NewTLS(opts Options) (*TLS, error) {
 	var cert tls.Certificate
 	var chain []*x509.Certificate
 
-	if opts.KeystoreFile == "" {
-		generated, err := selfSignedCertificate(opts.KeyPassword)
-		if err != nil {
-			return nil, err
+	switch {
+	case opts.CertFile != "" || opts.KeyFile != "":
+		if opts.KeystoreFile != "" {
+			return nil, fmt.Errorf("configure either certificateFile/privateKeyFile or keystoreFile, not both")
 		}
-		cert = generated
-		leaf, err := x509.ParseCertificate(generated.Certificate[0])
-		if err != nil {
-			return nil, err
+		if opts.CertFile == "" || opts.KeyFile == "" {
+			return nil, fmt.Errorf("certificateFile and privateKeyFile must be set together")
 		}
-		chain = []*x509.Certificate{leaf}
-	} else {
+		pair, err := tls.LoadX509KeyPair(opts.CertFile, opts.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("loading PEM certificate/key pair: %w", err)
+		}
+		cert = pair
+		for _, der := range pair.Certificate {
+			parsed, err := x509.ParseCertificate(der)
+			if err != nil {
+				return nil, fmt.Errorf("parsing certificate chain: %w", err)
+			}
+			chain = append(chain, parsed)
+		}
+	case opts.KeystoreFile != "":
 		if opts.KeystoreType == "JKS" {
 			return nil, fmt.Errorf("JKS keystores are not supported by the Go server; convert to PKCS12 with keytool -importkeystore")
 		}
@@ -71,10 +90,28 @@ func NewTLS(opts Options) (*TLS, error) {
 			der = append(der, c.Raw)
 		}
 		cert = tls.Certificate{Certificate: der, PrivateKey: priv}
+	default:
+		generated, err := selfSignedCertificate(opts.KeyPassword)
+		if err != nil {
+			return nil, err
+		}
+		cert = generated
+		leaf, err := x509.ParseCertificate(generated.Certificate[0])
+		if err != nil {
+			return nil, err
+		}
+		chain = []*x509.Certificate{leaf}
 	}
 
 	return &TLS{
-		Config: &tls.Config{Certificates: []tls.Certificate{cert}},
+		Config: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+			// Dual-protocol serving wraps connections before http.Server sees
+			// them, so the server never negotiates ALPN itself — offering h2
+			// would break clients.
+			NextProtos: []string{"http/1.1"},
+		},
 		// keyPassword: Go's TLS stack reads the private key directly, so the
 		// PKCS12 key password only matters at decode time.
 		Certificates: chain,

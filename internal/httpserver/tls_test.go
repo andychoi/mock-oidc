@@ -105,3 +105,67 @@ func TestKeystoreTLS(t *testing.T) {
 		t.Errorf("missing keystore should fail")
 	}
 }
+
+func TestPEMCertificate(t *testing.T) {
+	certFile, keyFile, _ := selfSignedPEM(t)
+	setup, err := NewTLS(Options{CertFile: certFile, KeyFile: keyFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	leaf := setup.Certificates[0]
+	if leaf.Subject.CommonName != "oidc.dev.test" {
+		t.Errorf("CN = %q", leaf.Subject.CommonName)
+	}
+	foundSAN := false
+	for _, n := range leaf.DNSNames {
+		if n == "oidc.dev.test" {
+			foundSAN = true
+		}
+	}
+	if !foundSAN {
+		t.Errorf("SANs: dns=%v", leaf.DNSNames)
+	}
+
+	// serve real TLS and fetch with the trust pool
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", setup.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("secure"))
+	}))
+
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: setup.TrustPool()}}}
+	resp, err := client.Get("https://" + ln.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("TLS fetch: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("status %d", resp.StatusCode)
+	}
+}
+
+func TestPEMCertificateConfigErrors(t *testing.T) {
+	certFile, keyFile, _ := selfSignedPEM(t)
+
+	// a PEM pair and a keystore at once is ambiguous — fatal, never a silent
+	// preference
+	if _, err := NewTLS(Options{CertFile: certFile, KeyFile: keyFile, KeystoreFile: "x.p12"}); err == nil ||
+		!strings.Contains(err.Error(), "not both") {
+		t.Errorf("PEM + keystore should be rejected: %v", err)
+	}
+
+	// a partial PEM pair is a fatal config error
+	if _, err := NewTLS(Options{CertFile: certFile}); err == nil ||
+		!strings.Contains(err.Error(), "set together") {
+		t.Errorf("cert without key should be rejected: %v", err)
+	}
+
+	// a bad cert file path fails loudly
+	if _, err := NewTLS(Options{CertFile: filepath.Join(t.TempDir(), "nope.pem"), KeyFile: keyFile}); err == nil {
+		t.Errorf("missing PEM should fail")
+	}
+}

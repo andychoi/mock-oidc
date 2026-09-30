@@ -10,5 +10,8 @@ dist/
 # repowise index cache (rebuild with: repowise update)
 /.repowise/
 
+# local TLS certificates (regenerate with: make tls)
+/tls/
+
 # per-user Claude Code settings
 /.claude/settings.local.json

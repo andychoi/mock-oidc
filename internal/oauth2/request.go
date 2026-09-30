@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/andychoi/mock-oidc/internal/httpserver"
 )
 
 // MaxBodyBytes mirrors the 1 MiB body cap enforced by the Netty pipeline upstream.
@@ -34,7 +36,9 @@ type Request struct {
 // and host information needed for proxy-aware URL derivation.
 func FromHTTPRequest(r *http.Request) (*Request, error) {
 	scheme := "http"
-	if r.TLS != nil {
+	// Behind the dual HTTP/HTTPS listener net/http never sees the *tls.Conn,
+	// so r.TLS stays nil on TLS traffic — ask the sniffing connection too.
+	if r.TLS != nil || httpserver.RequestIsTLS(r) {
 		scheme = "https"
 	}
 	var body []byte

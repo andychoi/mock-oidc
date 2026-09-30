@@ -38,12 +38,17 @@ type OAuth2Config struct {
 	Entra *entra.Config `json:"-"`
 }
 
-// SSLSettings mirrors the Kotlin SslConfig JSON shape.
+// SSLSettings mirrors the Kotlin SslConfig JSON shape, extended with a PEM
+// certificate/key pair (certificateFile/privateKeyFile) as an alternative to
+// the PKCS12 keystore — e.g. an mkcert local-CA certificate for
+// https://oidc.dev.test. Setting both forms is a fatal boot error.
 type SSLSettings struct {
 	KeyPassword      string `json:"keyPassword"`
 	KeystoreFile     string `json:"keystoreFile"`
 	KeystoreType     string `json:"keystoreType"`
 	KeystorePassword string `json:"keystorePassword"`
+	CertificateFile  string `json:"certificateFile"`
+	PrivateKeyFile   string `json:"privateKeyFile"`
 }
 
 type tokenProviderConfig struct {

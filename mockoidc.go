@@ -4,7 +4,6 @@
 package mockoidc
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net"
@@ -62,6 +61,8 @@ func New(cfg *config.OAuth2Config, opts ...Option) (*Server, error) {
 			KeystoreFile:     cfg.SSL.KeystoreFile,
 			KeystoreType:     cfg.SSL.KeystoreType,
 			KeystorePassword: cfg.SSL.KeystorePassword,
+			CertFile:         cfg.SSL.CertificateFile,
+			KeyFile:          cfg.SSL.PrivateKeyFile,
 		})
 		if err != nil {
 			return nil, err
@@ -76,18 +77,20 @@ func New(cfg *config.OAuth2Config, opts ...Option) (*Server, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
-	s.http = &http.Server{Handler: s.srv.Handler()}
+	s.http = httpserver.NewServer(s.srv.Handler())
 	return s, nil
 }
 
-// Start binds and serves on the address (":0" picks a random port).
+// Start binds and serves on the address (":0" picks a random port). With TLS
+// configured the port speaks HTTPS and plain HTTP alike: the dual listener
+// sniffs each connection's first byte (ai-gateway deploy pattern).
 func (s *Server) Start(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	if s.tlsSetup != nil {
-		ln = tls.NewListener(ln, s.tlsSetup.Config)
+		ln = httpserver.Dual(ln, s.tlsSetup.Config)
 	}
 	s.listener = ln
 	go func() { _ = s.http.Serve(ln) }()
