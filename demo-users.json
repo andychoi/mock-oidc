@@ -11,5 +11,9 @@
   {"username": "kevin", "name": "Kevin Park",   "email": "kevin@acme.com",   "groups": ["acme-employees", "dochub-user", "gitea-maintainers"]},
   {"username": "tom",   "name": "Tom Anderson", "email": "tom@acme.com",     "groups": ["acme-employees", "dochub-user", "gitea-developers"]},
   {"username": "mark",  "name": "Mark Kim",     "email": "mark@acme.com",    "groups": ["acme-employees", "dochub-user", "gitea-maintainers"]},
-  {"username": "andy",  "name": "Andy Choi",    "email": "andy@acme.com",    "groups": ["platform-admins", "acme-admins", "dochub-admin"]}
+  {"username": "andy",  "name": "Andy Choi",    "email": "andy@acme.com",    "groups": ["platform-admins", "acme-admins", "dochub-admin"]},
+
+  {"username": "ams-admin",    "name": "AMS Admin",    "email": "admin@acme.test",    "groups": ["acme-admins"]},
+  {"username": "ams-engineer", "name": "AMS Engineer", "email": "engineer@acme.test", "groups": ["acme-employees"]},
+  {"username": "ams-customer", "name": "AMS Customer", "email": "customer@acme.test", "groups": []}
 ]
