@@ -164,3 +164,22 @@ func TestDisabledAccountFailsTokenEndpoint(t *testing.T) {
 		})
 	}
 }
+
+// httptestNewForm builds a form POST for tests that need to set headers on it
+// before handing it to the handler.
+func httptestNewForm(t *testing.T, target, form string) *http.Request {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return r
+}
+
+// mustRequest normalizes an http.Request the way the router does.
+func mustRequest(t *testing.T, r *http.Request) *oauth2.Request {
+	t.Helper()
+	req, err := oauth2.FromHTTPRequest(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}

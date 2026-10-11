@@ -445,3 +445,54 @@ func TestGraphEndToEndLoginHint(t *testing.T) {
 		t.Errorf("signed in as %v", claims["preferred_username"])
 	}
 }
+
+// entraAppOnlyConfig enables the app-only grant, which is opt-in.
+const entraAppOnlyConfig = `{
+  "interactiveLogin": true,
+  "entra": {
+    "graph": {"appOnly": true},
+    "tenants": [{"tid": "11111111-1111-1111-1111-111111111111", "name": "Corp", "domains": ["corp.example"]}],
+    "apps": [{"clientId": "sync", "tid": "11111111-1111-1111-1111-111111111111",
+              "roles": ["User.Read.All", "Group.Read.All"]}],
+    "users": [
+      {"username": "jane", "tid": "11111111-1111-1111-1111-111111111111", "name": "Jane Kim",
+       "email": "jane@corp.example", "groups": ["PMO"]},
+      {"username": "sora", "tid": "11111111-1111-1111-1111-111111111111", "name": "Sora Han"}
+    ]
+  }
+}`
+
+// A directory-sync job: client credentials, then read /users with the token.
+func TestGraphEndToEndAppOnly(t *testing.T) {
+	_, base := startServer(t, entraAppOnlyConfig)
+	form := "grant_type=client_credentials&client_id=sync&client_secret=s&scope=" +
+		url.QueryEscape("https://graph.microsoft.com/.default")
+	status, _, raw := do(t, http.MethodPost, base+"/entra/"+tidCorp+"/oauth2/v2.0/token", form, formHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("client_credentials status %d: %s", status, raw)
+	}
+	var tok map[string]any
+	if err := json.Unmarshal([]byte(raw), &tok); err != nil {
+		t.Fatal(err)
+	}
+	at := tok["access_token"].(string)
+	claims := decodeClaims(t, at)
+	if claims["appid"] != "sync" || claims["tid"] != tidCorp {
+		t.Errorf("app-only claims = %v", claims)
+	}
+	if _, has := claims["oid"]; has {
+		t.Error("an app-only token must carry no oid")
+	}
+
+	st, _, users := graphCall(t, http.MethodGet, base+"/entra/graph/v1.0/users", at, "")
+	if st != http.StatusOK {
+		t.Fatalf("app-only /users = %d %v", st, users)
+	}
+	if got := len(users["value"].([]any)); got != 2 {
+		t.Errorf("users = %d, want both accounts", got)
+	}
+	// No user behind the token, so /me has nothing to describe.
+	if st, _, me := graphCall(t, http.MethodGet, base+"/entra/graph/v1.0/me", at, ""); st != http.StatusForbidden {
+		t.Errorf("app-only /me = %d %v, want 403", st, me)
+	}
+}
