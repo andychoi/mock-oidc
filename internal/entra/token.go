@@ -41,10 +41,12 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	cfg := h.conf()
 	t := cfg.Tenant(c.tid)
 	u := cfg.User(c.tid, c.username)
-	if u.Error == ErrInvalidGrant {
+	// accountEnabled: false is the ergonomic spelling of error: "invalid_grant".
+	if u.Error == ErrInvalidGrant || !u.Enabled() {
 		return invalidGrant("AADSTS50057: The user account is disabled.")
 	}
-	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, Tenant: t, User: u, ClientID: c.req.ClientID,
+	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
+		OverageSelfHosted: cfg.OverageSelfHosted(), Tenant: t, User: u, ClientID: c.req.ClientID,
 		Nonce: c.req.Nonce, Scopes: c.req.Scope, Now: h.now(), Expiry: cfg.TokenExpiry}
 	resp := jsonx.Obj{
 		{Name: "token_type", V: "Bearer"},

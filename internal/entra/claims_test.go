@@ -111,3 +111,120 @@ func TestAccessTokenClaims(t *testing.T) {
 		t.Error("access token must not carry nonce")
 	}
 }
+
+// overageInput builds a claims input for a user over the group limit.
+func overageInput(selfHosted bool) TokenInput {
+	tn := corpTenant()
+	tn.GroupLimit = 1
+	u := &User{Username: "many", TID: tidA, OID: "oid-many", Groups: []string{"G1", "G2"}}
+	in := claimsInput(tn, u, "openid")
+	in.GraphBase = "graph"
+	in.OverageSelfHosted = selfHosted
+	return in
+}
+
+func overageEndpointOf(t *testing.T, in TokenInput) string {
+	t.Helper()
+	c := IDTokenClaims(in)
+	src, ok := c["_claim_sources"].(map[string]any)["src1"].(map[string]any)
+	if !ok {
+		t.Fatalf("no overage source: %v", c)
+	}
+	return src["endpoint"].(string)
+}
+
+// With the emulated Graph serving getMemberObjects, the overage claim must
+// point at us, or a relying party that follows it leaves the test environment.
+func TestOverageEndpointPointsAtSelfByDefault(t *testing.T) {
+	got := overageEndpointOf(t, overageInput(true))
+	want := "http://h:1/entra/graph/v1.0/users/oid-many/getMemberObjects"
+	if got != want {
+		t.Errorf("endpoint = %q, want %q", got, want)
+	}
+}
+
+func TestOverageEndpointAtMicrosoftWhenNotSelfHosted(t *testing.T) {
+	got := overageEndpointOf(t, overageInput(false))
+	want := "https://graph.microsoft.com/v1.0/users/oid-many/getMemberObjects"
+	if got != want {
+		t.Errorf("endpoint = %q, want %q", got, want)
+	}
+}
+
+// A self-hosted endpoint needs an origin to be absolute; without one the real
+// Graph URL is still a valid answer.
+func TestOverageEndpointFallsBackWithoutOrigin(t *testing.T) {
+	in := overageInput(true)
+	in.Origin = ""
+	if got := overageEndpointOf(t, in); !strings.HasPrefix(got, "https://graph.microsoft.com/") {
+		t.Errorf("endpoint = %q", got)
+	}
+}
+
+func TestStripScopePrefix(t *testing.T) {
+	cases := map[string]string{
+		"openid":                                "openid",
+		"https://graph.microsoft.com/User.Read": "User.Read",
+		"https://graph.microsoft.com/.default":  ".default",
+		"api://11111111-1111-1111-1111-111111111111/access_as_user": "access_as_user",
+		"https://graph.microsoft.com":                               "https://graph.microsoft.com",
+		"User.Read":                                                 "User.Read",
+	}
+	for in, want := range cases {
+		if got := StripScopePrefix(in); got != want {
+			t.Errorf("StripScopePrefix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// scp carries API permission names; offline_access governs the grant, not an
+// API, so Entra leaves it out.
+func TestScpStripsResourcePrefixAndDropsOfflineAccess(t *testing.T) {
+	u := &User{Username: "jane", TID: tidA, OID: "o"}
+	scopes := []string{"openid", "offline_access", "https://graph.microsoft.com/User.Read",
+		"api://11111111-1111-1111-1111-111111111111/access_as_user"}
+	c := AccessTokenClaims(claimsInput(corpTenant(), u, scopes...))
+	if c["scp"] != "openid User.Read access_as_user" {
+		t.Errorf("scp = %v", c["scp"])
+	}
+}
+
+func TestAccessTokenCarriesAzpAndAppid(t *testing.T) {
+	u := &User{Username: "jane", TID: tidA, OID: "o"}
+	c := AccessTokenClaims(claimsInput(corpTenant(), u, "openid"))
+	if c["azp"] != "app" || c["appid"] != "app" {
+		t.Errorf("azp=%v appid=%v, want the client id", c["azp"], c["appid"])
+	}
+	// The ID token names its audience, not the authorized party.
+	id := IDTokenClaims(claimsInput(corpTenant(), u, "openid"))
+	for _, absent := range []string{"azp", "appid", "scp"} {
+		if _, has := id[absent]; has {
+			t.Errorf("%s belongs to the access token only", absent)
+		}
+	}
+}
+
+func TestGivenFamilyNameRolesWidsOnlyWhenConfigured(t *testing.T) {
+	bare := &User{Username: "jane", TID: tidA, OID: "o"}
+	c := IDTokenClaims(claimsInput(corpTenant(), bare, "openid"))
+	for _, absent := range []string{"given_name", "family_name", "roles", "wids"} {
+		if _, has := c[absent]; has {
+			t.Errorf("%s must be absent when unconfigured", absent)
+		}
+	}
+	full := &User{Username: "jane", TID: tidA, OID: "o", GivenName: "Jane", Surname: "Kim",
+		Roles: []string{"Portal.Admin"}, WIDs: []string{"62e90394-69f5-4237-9190-012177145e10"}}
+	c = IDTokenClaims(claimsInput(corpTenant(), full, "openid"))
+	if c["given_name"] != "Jane" || c["family_name"] != "Kim" {
+		t.Errorf("name claims = %v / %v", c["given_name"], c["family_name"])
+	}
+	if !reflect.DeepEqual(c["roles"], []string{"Portal.Admin"}) ||
+		!reflect.DeepEqual(c["wids"], []string{"62e90394-69f5-4237-9190-012177145e10"}) {
+		t.Errorf("roles=%v wids=%v", c["roles"], c["wids"])
+	}
+	// Both appear on the access token too, as Entra emits them.
+	a := AccessTokenClaims(claimsInput(corpTenant(), full, "openid"))
+	if !reflect.DeepEqual(a["roles"], []string{"Portal.Admin"}) || a["given_name"] != "Jane" {
+		t.Errorf("access token = %v", a)
+	}
+}

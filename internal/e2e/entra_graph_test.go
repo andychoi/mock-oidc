@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -283,5 +284,84 @@ func TestGraphEndToEndUserInfo(t *testing.T) {
 	// POST is equivalent, as OIDC requires.
 	if st, _, post := graphCall(t, http.MethodPost, endpoint, at, ""); st != http.StatusOK || post["sub"] != body["sub"] {
 		t.Errorf("POST userinfo = %d %v", st, post)
+	}
+}
+
+// The loop that motivated this feature: a user over the group limit gets no
+// groups claim but an overage pointer, and that pointer -- fetched with the
+// access token from the same sign-in -- returns the group ids.
+func TestGraphResolvesGroupOverage(t *testing.T) {
+	_, base := startServer(t, entraGraphConfig)
+	at, claims := entraAccessToken(t, base, tidCust, tidCust, "many")
+
+	if _, has := claims["groups"]; has {
+		t.Fatalf("a user over the limit must have no groups claim: %v", claims["groups"])
+	}
+	names, ok := claims["_claim_names"].(map[string]any)
+	if !ok || names["groups"] != "src1" {
+		t.Fatalf("_claim_names = %v", claims["_claim_names"])
+	}
+	sources, ok := claims["_claim_sources"].(map[string]any)
+	if !ok {
+		t.Fatalf("_claim_sources = %v", claims["_claim_sources"])
+	}
+	endpoint, _ := sources["src1"].(map[string]any)["endpoint"].(string)
+	// It must point at this server, not at the real Graph.
+	if !strings.HasPrefix(endpoint, base+"/entra/graph/v1.0/users/") ||
+		!strings.HasSuffix(endpoint, "/getMemberObjects") {
+		t.Fatalf("overage endpoint = %q, want one on this server", endpoint)
+	}
+
+	// Follow it exactly as an RP would.
+	status, _, body := graphCall(t, http.MethodPost, endpoint, at, `{"securityEnabledOnly": true}`)
+	if status != http.StatusOK {
+		t.Fatalf("getMemberObjects status %d: %v", status, body)
+	}
+	got := []string{}
+	for _, v := range body["value"].([]any) {
+		got = append(got, v.(string))
+	}
+	if len(got) != 4 {
+		t.Fatalf("group ids = %v, want the four groups that overflowed", got)
+	}
+	// Those ids are the ones /me/memberOf reports, so the overage answer and
+	// the directory agree.
+	_, _, groups := graphCall(t, http.MethodGet, base+"/entra/graph/v1.0/me/memberOf", at, "")
+	fromGraph := map[string]bool{}
+	for _, g := range groups["value"].([]any) {
+		fromGraph[g.(map[string]any)["id"].(string)] = true
+	}
+	for _, id := range got {
+		if !fromGraph[id] {
+			t.Errorf("overage id %s is not a group in /me/memberOf (%v)", id, fromGraph)
+		}
+	}
+}
+
+// scp carries API permission short names; the response's scope field keeps
+// everything the client asked for.
+func TestGraphAccessTokenScp(t *testing.T) {
+	_, base := startServer(t, entraGraphConfig)
+	authorize := base + "/entra/" + tidCorp + "/oauth2/v2.0/authorize?response_type=code&client_id=iam" +
+		"&redirect_uri=" + url.QueryEscape(entraRedirect) + "&state=st1&scope=" +
+		url.QueryEscape("openid offline_access https://graph.microsoft.com/User.Read")
+	loc := entraSignIn(t, authorize, tidCorp, "jane")
+	status, tok, body := entraRedeem(t, base, tidCorp, "iam", loc.Query().Get("code"), "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("token status %d: %s", status, body)
+	}
+	if got := tok["scope"]; got != "openid offline_access https://graph.microsoft.com/User.Read" {
+		t.Errorf("response scope = %v, want every requested scope", got)
+	}
+	claims := decodeClaims(t, tok["access_token"].(string))
+	if claims["scp"] != "openid User.Read" {
+		t.Errorf("scp = %v, want short names without offline_access", claims["scp"])
+	}
+	if claims["azp"] != "iam" || claims["appid"] != "iam" {
+		t.Errorf("azp=%v appid=%v", claims["azp"], claims["appid"])
+	}
+	// offline_access was requested, so a refresh token comes back regardless.
+	if tok["refresh_token"] == nil {
+		t.Error("offline_access must still yield a refresh token")
 	}
 }

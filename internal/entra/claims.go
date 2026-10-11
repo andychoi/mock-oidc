@@ -15,6 +15,12 @@ const graphAppID = "00000003-0000-0000-c000-000000000000"
 
 // TokenInput carries everything needed to build one sign-in's tokens.
 type TokenInput struct {
+	// GraphBase and OverageSelfHosted decide where a group-overage claim
+	// sends the relying party. They are passed in rather than read from a
+	// config so the claim builders stay pure functions of their input.
+	GraphBase         string
+	OverageSelfHosted bool
+
 	Origin   string // proxy-aware scheme://host[:port]
 	BasePath string
 	Tenant   *Tenant // the signing-in user's tenant (also for organizations/common)
@@ -67,7 +73,19 @@ func IDTokenClaims(in TokenInput) map[string]any {
 	if len(in.User.AMR) > 0 {
 		c["amr"] = in.User.AMR
 	}
-	addGroups(c, in.Tenant, in.User)
+	if in.User.GivenName != "" {
+		c["given_name"] = in.User.GivenName
+	}
+	if in.User.Surname != "" {
+		c["family_name"] = in.User.Surname
+	}
+	if len(in.User.Roles) > 0 {
+		c["roles"] = in.User.Roles
+	}
+	if len(in.User.WIDs) > 0 {
+		c["wids"] = in.User.WIDs
+	}
+	addGroups(c, in)
 	return c
 }
 
@@ -77,8 +95,46 @@ func AccessTokenClaims(in TokenInput) map[string]any {
 	c := IDTokenClaims(in)
 	delete(c, "nonce")
 	c["aud"] = graphAppID
-	c["scp"] = strings.Join(in.Scopes, " ")
+	c["scp"] = ScopeValue(in.Scopes)
+	// Entra names the client on the access token twice: azp for the
+	// authorized party, appid for the application.
+	c["azp"] = in.ClientID
+	c["appid"] = in.ClientID
 	return c
+}
+
+// ScopeValue is the access token's scp: the granted scope names with any
+// resource prefix stripped (https://graph.microsoft.com/User.Read becomes
+// User.Read, as Entra emits), minus the grant-only scopes, which are not API
+// permissions. The token response's own "scope" field keeps everything.
+func ScopeValue(scopes []string) string {
+	out := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		if grantOnlyScopes[s] {
+			continue
+		}
+		if name := StripScopePrefix(s); name != "" {
+			out = append(out, name)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// grantOnlyScopes never appear in scp: they govern the grant, not an API.
+var grantOnlyScopes = map[string]bool{"offline_access": true}
+
+// StripScopePrefix removes a resource prefix from a scope identifier:
+// api://<guid>/access_as_user and https://graph.microsoft.com/User.Read become
+// access_as_user and User.Read; a bare scope such as openid is unchanged.
+func StripScopePrefix(scope string) string {
+	scheme := strings.Index(scope, "://")
+	if scheme == -1 {
+		return scope
+	}
+	if slash := strings.LastIndex(scope, "/"); slash > scheme+2 {
+		return scope[slash+1:]
+	}
+	return scope
 }
 
 func preferredUsername(t *Tenant, u *User) string {
@@ -93,14 +149,15 @@ func preferredUsername(t *Tenant, u *User) string {
 
 // addGroups emits groups (names or object IDs), or the overage markers when
 // the user has more groups than the tenant limit.
-func addGroups(c map[string]any, t *Tenant, u *User) {
+func addGroups(c map[string]any, in TokenInput) {
+	t, u := in.Tenant, in.User
 	if len(u.Groups) == 0 {
 		return
 	}
 	if len(u.Groups) > t.GroupLimit {
 		c["_claim_names"] = map[string]any{"groups": "src1"}
 		c["_claim_sources"] = map[string]any{"src1": map[string]any{
-			"endpoint": "https://graph.microsoft.com/v1.0/users/" + u.OID + "/getMemberObjects",
+			"endpoint": overageEndpoint(in),
 		}}
 		return
 	}
@@ -113,6 +170,17 @@ func addGroups(c map[string]any, t *Tenant, u *User) {
 		}
 	}
 	c["groups"] = vals
+}
+
+// overageEndpoint is where a relying party resolves a group-overage claim.
+// With the emulated Graph serving getMemberObjects it points at us, so the
+// claim is actually followable in a test environment; otherwise it names the
+// real Graph, which is what Entra emits.
+func overageEndpoint(in TokenInput) string {
+	if !in.OverageSelfHosted || in.Origin == "" || in.BasePath == "" || in.GraphBase == "" {
+		return "https://graph.microsoft.com/v1.0/users/" + in.User.OID + "/getMemberObjects"
+	}
+	return in.Origin + "/" + in.BasePath + "/" + in.GraphBase + "/v1.0/users/" + in.User.OID + "/getMemberObjects"
 }
 
 func hasScope(scopes []string, s string) bool {
