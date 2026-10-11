@@ -87,6 +87,12 @@ func graphGroups(gs []DirGroup) []jsonx.Obj {
 // never in the path: it comes from the caller's token, exactly as real Graph
 // scopes a response by the token's tenant.
 func (h *Handler) graph(req *oauth2.Request, cfg *Config, segs []string) routing.Response {
+	if strings.Join(segs, "/") == userInfoPath {
+		if !cfg.UserInfoOn() {
+			return h.graphErrorResponse(req, notFound("The requested resource does not exist."))
+		}
+		return h.userInfo(req, cfg)
+	}
 	if len(segs) < 2 || segs[0] != "v1.0" {
 		return h.graphErrorResponse(req, notFound("The requested resource does not exist."))
 	}

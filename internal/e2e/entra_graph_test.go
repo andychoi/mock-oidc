@@ -255,3 +255,33 @@ func TestGraphDoesNotShadowOtherRoutes(t *testing.T) {
 		t.Errorf("status %d body %s", status, body)
 	}
 }
+
+// Discovery advertises UserInfo and the advertised URL works with the access
+// token from the same sign-in.
+func TestGraphEndToEndUserInfo(t *testing.T) {
+	_, base := startServer(t, entraGraphConfig)
+	_, doc := entraGetJSON(t, base+"/entra/"+tidCorp+"/v2.0/.well-known/openid-configuration", nil)
+	endpoint, ok := doc["userinfo_endpoint"].(string)
+	if !ok || endpoint != base+"/entra/graph/oidc/userinfo" {
+		t.Fatalf("userinfo_endpoint = %v", doc["userinfo_endpoint"])
+	}
+	at, idClaims := entraAccessToken(t, base, tidCorp, tidCorp, "jane")
+	status, hdr, body := graphCall(t, http.MethodGet, endpoint, at, "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %v", status, body)
+	}
+	// sub must be the same pairwise subject the ID token carries.
+	if body["sub"] != idClaims["sub"] || body["oid"] != idClaims["oid"] || body["tid"] != idClaims["tid"] {
+		t.Errorf("userinfo = %v, id token = %v", body, idClaims)
+	}
+	if body["given_name"] != "Jane" || body["family_name"] != "Kim" || body["email"] != "jane@corp.example" {
+		t.Errorf("profile claims = %v", body)
+	}
+	if hdr.Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q", hdr.Get("Cache-Control"))
+	}
+	// POST is equivalent, as OIDC requires.
+	if st, _, post := graphCall(t, http.MethodPost, endpoint, at, ""); st != http.StatusOK || post["sub"] != body["sub"] {
+		t.Errorf("POST userinfo = %d %v", st, post)
+	}
+}
