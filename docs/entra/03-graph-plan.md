@@ -11,12 +11,21 @@ section by section. Entra mode itself: [`00-design.md`](00-design.md), [`01-plan
 ## Global constraints
 
 - `go 1.27`, **no new module dependencies** (`go.mod`/`go.sum` unchanged).
-- **Additive and opt-in.** Without an `entra.graph` block, every response is byte-for-byte what it
-  is today. All existing tests must pass **unmodified** — in particular these three, which encode
-  today's behavior and must not be touched:
-  - `internal/e2e/entra_test.go` `TestEntraDiscoveryPerTenant` — `userinfo_endpoint` must be absent
-  - `internal/e2e/entra_test.go` `TestEntraUnsupportedGrantIsEntraError` — `client_credentials` → 400
-  - `internal/entra/claims_test.go` `TestGroupOverageBoundary` — overage endpoint shape
+- **Additive, and on by default.** Graph is enabled whenever Entra mode is; `{"graph":
+  {"enabled": false}}` restores today's behavior byte for byte. Without an `entra` block at all,
+  nothing changes — the navikt contract is untouched either way.
+- **Exactly one existing assertion may change**, and only this one:
+  - `internal/e2e/entra_test.go` `TestEntraDiscoveryPerTenant` — the three lines asserting
+    `userinfo_endpoint` is absent become an assertion that it equals
+    `{base}/entra/graph/oidc/userinfo`. Sanctioned in Task 6; it encodes a design decision we are
+    deliberately revising, not a test bent to fit new code.
+
+  These two must pass **unmodified** — if either goes red, the gating is wrong, not the test:
+  - `internal/e2e/entra_test.go` `TestEntraUnsupportedGrantIsEntraError` — `client_credentials` →
+    400, preserved by `appOnly` staying default-off (Task 9)
+  - `internal/entra/claims_test.go` `TestGroupOverageBoundary` — asserts the endpoint with
+    `strings.Contains(ep, "/users/oid-b/getMemberObjects")`, which the self-hosted URL also
+    satisfies (Task 7)
 - `internal/entra` keeps its import rule: stdlib, `internal/oauth2`, `internal/routing`,
   `internal/jsonx`, `internal/token`. Never `internal/config` or `internal/server`.
 - Graph error bodies must **not** pass through `routing.ErrorResponse` (it lowercases the body for
@@ -27,8 +36,9 @@ section by section. Entra mode itself: [`00-design.md`](00-design.md), [`01-plan
 
 ## Review focus
 
-1. **Nothing leaks when Graph is off.** No `userinfo_endpoint`, no `/graph/*` route, overage
-   endpoint unchanged, `client_credentials` still rejected. *(Task 8 `TestGraphAbsentWhenNotConfigured`.)*
+1. **`enabled: false` is a real off switch**, not a half-measure: no `userinfo_endpoint`, no
+   `/graph/*` route (the segment is not even reserved), overage endpoint back to Microsoft's,
+   `client_credentials` still rejected. *(Task 8 `TestGraphDisabledByConfig`.)*
 2. **Tenant isolation.** A Corp delegated token must not see Customer X users or groups anywhere —
    `/users`, `/groups`, `/users/{id}`, `memberOf`, `getMemberObjects`. *(Task 5 `TestGraphTenantIsolation`.)*
 3. **Token validation is real.** A tampered signature, a wrong `aud`, a wrong origin's `iss`, an
@@ -74,7 +84,7 @@ section by section. Entra mode itself: [`00-design.md`](00-design.md), [`01-plan
 
 ```go
 type GraphConfig struct {
-	Enabled         *bool  `json:"enabled"`         // nil → true (presence enables)
+	Enabled         *bool  `json:"enabled"`         // nil → true (on by default, block or no block)
 	BasePath        string `json:"basePath"`        // default "graph"
 	OverageEndpoint string `json:"overageEndpoint"` // "self" (default) | "microsoft"
 	UserInfo        *bool  `json:"userinfo"`        // nil → true
@@ -84,7 +94,7 @@ type GraphConfig struct {
 	ClockSkew       int64  `json:"clockSkew"`       // seconds, default 60
 }
 
-func (c *Config) GraphOn() bool     // Graph != nil && *Enabled
+func (c *Config) GraphOn() bool     // Graph == nil || *Graph.Enabled
 func (c *Config) UserInfoOn() bool  // GraphOn() && *Graph.UserInfo
 func (c *Config) GraphBase() string // Graph.BasePath, or "graph"
 
@@ -109,8 +119,10 @@ names non-empty and unique per tenant, explicit `oid` lowercased and GUID-checke
 - [ ] **Step 1: failing tests** in `graphconfig_test.go` and `config_test.go`
   - `TestGraphConfigDefaults` — `{"graph":{}}` → on, basePath `graph`, overage `self`, userinfo on,
     appOnly off, 100/999/60.
-  - `TestGraphConfigDisabled` — `{"graph":{"enabled":false}}` → `GraphOn() == false`.
-  - `TestGraphOffWhenAbsent` — today's config → `GraphOn() == false`, `UserInfoOn() == false`.
+  - `TestGraphOnWhenBlockAbsent` — a config with **no** `graph` key → `GraphOn()`, `UserInfoOn()`,
+    and every default above, identical to `{"graph":{}}`.
+  - `TestGraphConfigDisabled` — `{"graph":{"enabled":false}}` → `GraphOn() == false`,
+    `UserInfoOn() == false`, and `GraphBase()` is never reserved.
   - `TestGraphConfigRejects` — table: basePath colliding with `entra.basePath`/`_entra`/
     `organizations`/`common`, bad basePath charset, bad `overageEndpoint`, unknown field.
   - `TestUserProfileFieldsNormalize` — `upn` lowercased, `accountEnabled` nil → treated as true by
@@ -270,7 +282,7 @@ not; `businessPhones` renders `[]` and single-valued gaps render `null`; `$filte
 `internal/e2e/entra_graph_test.go`; modify `internal/entra/handler.go`.
 
 In `Handle`, reserve the Graph segment before tenant resolution — next to the existing `_entra`
-branch, and only while `GraphOn()`:
+branch, and only while `GraphOn()` (true unless explicitly disabled):
 
 ```go
 if cfg := h.conf(); cfg.GraphOn() && segs[1] == cfg.GraphBase() {
@@ -278,8 +290,9 @@ if cfg := h.conf(); cfg.GraphOn() && segs[1] == cfg.GraphBase() {
 }
 ```
 
-With Graph off the segment is not reserved, so `/{base}/graph/...` resolves as a tenant and gives
-today's `AADSTS90002`. Every handler then: `h.ValidateAccessToken` → tenant from `caller.TID` →
+With `enabled: false` the segment is not reserved, so `/{base}/graph/...` resolves as a tenant and
+gives today's `AADSTS90002` — the same answer a server without the feature gives, which is what
+makes the switch honest. Every handler then: `h.ValidateAccessToken` → tenant from `caller.TID` →
 dispatch. Routes and shapes per design §5; `/me*` requires `caller.Kind == TokenDelegated`, else
 `403 Authorization_RequestDenied`.
 
@@ -322,7 +335,11 @@ dispatch. Routes and shapes per design §5; `/me*` requires `caller.Kind == Toke
 `internal/entra/handler.go` (discovery).
 
 `GET|POST /{base}/{graphBase}/oidc/userinfo` per design §5.3. Add `userinfo_endpoint` to discovery
-**only** while `UserInfoOn()`, so `TestEntraDiscoveryPerTenant` stays green unmodified.
+while `UserInfoOn()` — true by default, so **this is the task that changes
+`TestEntraDiscoveryPerTenant`**. Replace its three `userinfo_endpoint must be absent` lines with an
+assertion that the field equals `base + "/entra/graph/oidc/userinfo"`, and change nothing else in
+that test or any other. If a second existing assertion goes red in this task, stop and fix the
+gating instead.
 
 - [ ] **Step 1: failing tests**
   - `TestUserInfoClaims` — `sub` equals the token's `sub` (pairwise), plus `oid`, `tid`, `name`,
@@ -330,12 +347,14 @@ dispatch. Routes and shapes per design §5; `/me*` requires `caller.Kind == Toke
   - `TestUserInfoPostMatchesGet`, `TestUserInfoNoStore` (`Cache-Control: no-store`).
   - `TestUserInfoAppOnlyIs403` — `insufficient_scope`, RFC 6750 header and matching JSON body.
   - `TestUserInfoInvalidTokenIs401`, `TestUserInfoDisabledUserIs401`.
-  - `TestDiscoveryAdvertisesUserInfoOnlyWhenEnabled` — with `"graph":{}` present and with
-    `"userinfo":false`.
+  - `TestDiscoveryAdvertisesUserInfoByDefault` — no `graph` block at all → the field is present
+    and fetchable.
+  - `TestDiscoveryOmitsUserInfoWhenDisabled` — `"userinfo":false`, and `"enabled":false`.
 - [ ] **Step 2: run to verify failure**
 - [ ] **Step 3: implement** `userinfo.go`, extend `discovery`
-- [ ] **Step 4: run** `go test ./internal/entra/ ./internal/e2e/ -v`
-- [ ] **Step 5: commit** `feat(entra): OIDC userinfo endpoint`
+- [ ] **Step 4: update the one sanctioned assertion** in `TestEntraDiscoveryPerTenant`
+- [ ] **Step 5: run** `go test ./...` and confirm the only existing test touched is that one
+- [ ] **Step 6: commit** `feat(entra): OIDC userinfo endpoint`
 
 ---
 
@@ -344,16 +363,18 @@ dispatch. Routes and shapes per design §5; `/me*` requires `caller.Kind == Toke
 **Files:** modify `internal/entra/claims.go`, `internal/entra/token.go`; extend
 `internal/entra/claims_test.go` (**add** cases, never edit the existing ones) and the e2e suite.
 
-Per design §6: overage endpoint → self when Graph is on (`overageEndpoint: "microsoft"` restores
-today's URL; with Graph off nothing changes, which is what keeps `TestGroupOverageBoundary` green);
-`scp` short names with `offline_access` dropped; `azp`/`appid` on the access token;
+Per design §6: overage endpoint → self by default (`overageEndpoint: "microsoft"` or
+`enabled: false` restores today's URL). `TestGroupOverageBoundary` stays green unmodified because
+it asserts with `strings.Contains(ep, "/users/oid-b/getMemberObjects")`, which the self-hosted URL
+satisfies — verify that rather than assuming it. Also: `scp` short names with `offline_access`
+dropped; `azp`/`appid` on the access token;
 `given_name`/`family_name`/`roles`/`wids` when configured; `accountEnabled: false` → AADSTS50057.
 
 `TokenInput` gains the fields the overage URL needs (`GraphBase string`, `OverageSelf bool`) — keep
 `IDTokenClaims`/`AccessTokenClaims` pure functions of their input.
 
 - [ ] **Step 1: failing tests**
-  - `TestOverageEndpointPointsAtSelfWhenGraphOn` / `…AtMicrosoftWhenConfigured` / `…WhenGraphOff`.
+  - `TestOverageEndpointPointsAtSelfByDefault` / `…AtMicrosoftWhenConfigured` / `…WhenGraphDisabled`.
   - `TestScpStripsResourcePrefixAndDropsOfflineAccess` — `openid offline_access
     https://graph.microsoft.com/User.Read` → `scp: "openid User.Read"`, response `scope` unchanged.
   - `TestAccessTokenCarriesAzpAndAppid`.
@@ -392,9 +413,10 @@ The hint matches on UPN, email, or username, case-insensitively. Error injection
   - `TestDomainHintNarrowsMultiTenantPicker`.
   - `TestPromptNoneWithoutHintIsInteractionRequired` (AADSTS50058),
     `TestPromptNoneWithHintIssuesCode`.
-  - `TestGraphAbsentWhenNotConfigured` *(belongs to this task's suite only for convenience)* — with
-    today's config: `/entra/graph/v1.0/me` → `AADSTS90002`, discovery has no `userinfo_endpoint`,
-    `client_credentials` → `unsupported_grant_type`, overage endpoint is the Microsoft URL.
+  - `TestGraphDisabledByConfig` *(belongs to this task's suite only for convenience)* — with
+    `"graph": {"enabled": false}`: `/entra/graph/v1.0/me` → `AADSTS90002`, discovery has no
+    `userinfo_endpoint`, `client_credentials` → `unsupported_grant_type`, and the overage endpoint
+    is the Microsoft URL.
 - [ ] **Step 2: run to verify failure**
 - [ ] **Step 3: implement**
 - [ ] **Step 4: run** `go test ./...`
@@ -408,8 +430,8 @@ The hint matches on UPN, email, or username, case-insensitively. Error injection
 `internal/entra/token.go`, `internal/entra/config.go` (`apps[]`).
 
 Per design §8. `Config.Apps []App{ClientID, TID, Roles}` supplies `roles`; any client is otherwise
-accepted. The grant stays rejected unless `graph.appOnly` is on, which is what keeps
-`TestEntraUnsupportedGrantIsEntraError` green.
+accepted. The grant stays rejected unless `graph.appOnly` is on — a deliberate default (it changes
+who can get a token at all), and the reason `TestEntraUnsupportedGrantIsEntraError` stays green.
 
 - [ ] **Step 1: failing tests**
   - `TestClientCredentialsRejectedUnlessEnabled`.
@@ -439,8 +461,9 @@ accepted. The grant stays rejected unless `graph.appOnly` is on, which is what k
       `POST /_entra/mint-token {tid, username, clientId, scope}` → a usable access token, so an RP
       test suite can exercise Graph without driving the picker. Document that it is a test-only
       endpoint, like the rest of `/_entra/`.
-- [ ] **Step 4** `entra-demo.json`: enable `"graph": {}`, give the demo users full profiles, a
-      manager chain, group metadata, and keep one over-limit user for the overage demo.
+- [ ] **Step 4** `entra-demo.json`: give the demo users full profiles, a manager chain and group
+      metadata, and keep one over-limit user for the overage demo. No `"graph"` block is needed —
+      show the `{"enabled": false}` form in a comment-free sibling example in the README instead.
 - [ ] **Step 5** README: a "Graph account API" section with `curl` examples (sign in → token →
       `/me` → `/me/memberOf` → `getMemberObjects`), the supported query options, and the documented
       divergences. Update `00-design.md` §Non-goals and §3 to point at `02-graph-design.md`, flip
@@ -453,6 +476,7 @@ accepted. The grant stays rejected unless `graph.appOnly` is on, which is what k
 
 ## Rollback
 
-Every task is additive and gated. Reverting Task 1's config block alone disables the whole feature;
-reverting Task 7 restores today's overage endpoint and `scp`. No existing file is rewritten — only
-extended — so a single `git revert` per task is clean.
+Every task is additive and gated behind one flag. Shipping `{"graph": {"enabled": false}}` is a
+config-only rollback that needs no deploy; reverting Task 7 alone restores today's overage endpoint
+and `scp`. No existing file is rewritten — only extended, plus the single sanctioned assertion in
+Task 6 — so a `git revert` per task is clean.

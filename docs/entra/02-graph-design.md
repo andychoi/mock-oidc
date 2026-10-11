@@ -122,8 +122,10 @@ front route with a `*` pattern, suffix routes untouched.
 
 ## 4. Configuration
 
-A new optional `"graph"` block inside the `entra` block. **Its presence enables the feature**; no
-block means today's behavior, byte for byte.
+Graph is **on whenever Entra mode is on**. The optional `"graph"` block inside the `entra` block
+only tunes it; `{"graph": {"enabled": false}}` turns it off and restores today's behavior, byte for
+byte. The one sub-feature that stays opt-in is `appOnly` (§8), because the `client_credentials`
+grant has its own contract.
 
 ```json
 {
@@ -160,7 +162,7 @@ block means today's behavior, byte for byte.
 
 | Field | Default | Effect |
 |---|---|---|
-| `graph.enabled` | `true` when the block is present | `false` keeps the block but serves 404s, like the runtime toggle |
+| `graph.enabled` | `true`, block or no block | `false` disables the whole surface: no routes, no `userinfo_endpoint`, and the overage endpoint reverts to Microsoft's |
 | `graph.basePath` | `graph` | the reserved segment; same charset rule as `entra.basePath` |
 | `graph.overageEndpoint` | `self` | `self` → our `getMemberObjects`; `microsoft` → today's `graph.microsoft.com` URL |
 | `graph.userinfo` | `true` | serve **and advertise** `userinfo_endpoint` in discovery |
@@ -262,8 +264,8 @@ navikt compatibility); `internal/entra` renders them directly.
 `family_name`, `email` when set. `Cache-Control: no-store`. An app-only token → `403
 insufficient_scope`; anything else invalid → `401 invalid_token` with `WWW-Authenticate` — RFC 6750
 style with a matching JSON body, as in entra-local. Advertised as `userinfo_endpoint` in discovery
-**only** while `graph.userinfo` is on, which is why today's discovery (and the test that asserts
-`userinfo_endpoint` is absent) is untouched.
+while `graph.userinfo` is on — which it is by default, so discovery gains a field it does not have
+today. This is the one existing assertion the feature changes (see §9).
 
 ### 5.4 Query options
 
@@ -276,12 +278,13 @@ style with a matching JSON body, as in entra-local. Advertised as `userinfo_endp
 
 ## 6. Token changes
 
-These apply to Entra mode only (already opt-in), and none of them change a response that an
-existing test asserts:
+These apply to Entra mode only (already opt-in):
 
-1. **Group overage resolves locally.** With Graph on, `_claim_sources.src1.endpoint` becomes
-   `{origin}/{base}/graph/v1.0/users/{oid}/getMemberObjects`. With Graph off, or
-   `overageEndpoint: "microsoft"`, it stays the real Graph URL.
+1. **Group overage resolves locally.** `_claim_sources.src1.endpoint` becomes
+   `{origin}/{base}/graph/v1.0/users/{oid}/getMemberObjects`. With Graph disabled, or
+   `overageEndpoint: "microsoft"`, it stays the real Graph URL. (`TestGroupOverageBoundary` asserts
+   the endpoint only with `strings.Contains(ep, "/users/oid-b/getMemberObjects")`, which both forms
+   satisfy, so it stays green unmodified.)
 2. **`scp` carries short names** with the resource prefix stripped
    (`https://graph.microsoft.com/User.Read` → `User.Read`) and `offline_access` dropped. The token
    response's `scope` field is unchanged.
@@ -308,8 +311,9 @@ Borrowed from both projects, because without them every RP test needs a browser:
 
 ## 8. App-only tokens
 
-Gated by `graph.appOnly` (default off, so the existing test asserting that `client_credentials` is
-`unsupported_grant_type` keeps passing). When on, `grant_type=client_credentials` with
+Gated by `graph.appOnly`, default off. Keeping it opt-in is a real design position, not test
+convenience: `client_credentials` changes who can get a token at all, and most RP tests want it
+rejected. It also leaves `TestEntraUnsupportedGrantIsEntraError` green unmodified. When on, `grant_type=client_credentials` with
 `scope=https://graph.microsoft.com/.default` on a **tenant-specific** path mints an access token
 with `tid` from the path, `sub` = `azp` = `appid` = `client_id`, `roles` from
 `entra.apps[].roles`, and no `oid`/`scp`. On `organizations`/`common` it is a 400 `invalid_request`
@@ -320,7 +324,7 @@ and gets `403 Authorization_RequestDenied` on `/me`, exactly as in entra-local.
 
 | Decision | Why |
 |---|---|
-| Graph is a sub-feature gated by an optional `"graph"` block, default **off** | The repo forbids editing existing tests; three of them encode today's "no userinfo, no Graph, no client credentials". Opt-in keeps them green and keeps the navikt contract irrelevant to this change. The demo config and compose file turn it on, so the lived default is "on" |
+| Graph is **on by default** with Entra mode, switchable off via `{"graph": {"enabled": false}}` | An Entra mock whose Graph you must remember to enable is an Entra mock whose Graph nobody uses. The cost is one existing assertion: `TestEntraDiscoveryPerTenant`'s `userinfo_endpoint must be absent`, which encoded the old decision that we had nowhere to point it. Updating that line is a sanctioned exception to "never edit existing tests", agreed when this design was reviewed — it is a decision being revised, not a test bent to fit new code. Nothing else needed changing: the overage assertion is a `strings.Contains` that both URL forms satisfy, and `appOnly` stays opt-in |
 | One tenant-agnostic `/graph/` base, scoped by the token's `tid` | Mirrors real Graph, and keeps the single front route |
 | Read-only | The admin UI already owns mutation, with copy-on-write and re-validation. Two write paths would be two sources of truth |
 | Group entities derived from user `groups[]`, ids from the existing `GroupObjectID` | No config break, and the ids already in `object_id` group claims and `/_entra/groups` are the same ids Graph returns — an RP can match a claim to a Graph object |
