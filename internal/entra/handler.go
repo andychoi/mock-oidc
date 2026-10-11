@@ -68,6 +68,15 @@ func (h *Handler) Handle(req *oauth2.Request) routing.Response {
 	if segs[1] == testAPISegment {
 		return h.testAPI(req, strings.Join(segs[2:], "/"))
 	}
+	cfg := h.conf()
+	// The Graph surface is tenant-agnostic: its segment is reserved ahead of
+	// tenant resolution, and the tenant comes from the caller's token. While
+	// Graph is disabled the segment is not reserved at all, so the path
+	// resolves as a tenant and answers AADSTS90002, exactly as a server
+	// without the feature does.
+	if cfg.GraphOn() && segs[1] == cfg.GraphBase() {
+		return h.graph(req, cfg, segs[2:])
+	}
 	sc, oerr := h.resolveScope(segs[1])
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
