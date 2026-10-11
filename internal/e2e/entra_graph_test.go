@@ -365,3 +365,83 @@ func TestGraphAccessTokenScp(t *testing.T) {
 		t.Error("offline_access must still yield a refresh token")
 	}
 }
+
+// entraGraphOffConfig disables Graph, which must restore the pre-feature
+// behavior exactly.
+const entraGraphOffConfig = `{
+  "interactiveLogin": true,
+  "entra": {
+    "graph": {"enabled": false},
+    "tenants": [
+      {"tid": "11111111-1111-1111-1111-111111111111", "name": "Corp", "domains": ["corp.example"]},
+      {"tid": "22222222-2222-2222-2222-22222222abcd", "name": "Customer X", "groupLimit": 1}
+    ],
+    "users": [
+      {"username": "jane", "tid": "11111111-1111-1111-1111-111111111111", "email": "jane@corp.example"},
+      {"username": "many", "tid": "22222222-2222-2222-2222-22222222abcd", "groups": ["G1", "G2"]}
+    ]
+  }
+}`
+
+func TestGraphDisabledByConfig(t *testing.T) {
+	_, base := startServer(t, entraGraphOffConfig)
+
+	// The Graph segment is not reserved, so it resolves as a tenant.
+	status, _, body := do(t, http.MethodGet, base+"/entra/graph/v1.0/me", "", nil)
+	if status != http.StatusBadRequest || !strings.Contains(body, "aadsts90002") {
+		t.Errorf("graph path = %d %s", status, body)
+	}
+
+	// Discovery advertises no UserInfo, and the path does not serve.
+	_, doc := entraGetJSON(t, base+"/entra/"+tidCorp+"/v2.0/.well-known/openid-configuration", nil)
+	if _, has := doc["userinfo_endpoint"]; has {
+		t.Errorf("userinfo_endpoint = %v, want absent", doc["userinfo_endpoint"])
+	}
+	if status, _, _ := do(t, http.MethodGet, base+"/entra/graph/oidc/userinfo", "", nil); status != http.StatusBadRequest {
+		t.Errorf("userinfo path = %d, want the tenant error", status)
+	}
+
+	// client_credentials stays unsupported.
+	status, _, body = do(t, http.MethodPost, base+"/entra/"+tidCorp+"/oauth2/v2.0/token",
+		"grant_type=client_credentials&client_id=iam&client_secret=s&scope="+
+			url.QueryEscape("https://graph.microsoft.com/.default"), formHeaders)
+	if status != http.StatusBadRequest || !strings.Contains(body, "unsupported_grant_type") {
+		t.Errorf("client_credentials = %d %s", status, body)
+	}
+
+	// And the overage claim points back at the real Graph.
+	_, claims := entraAccessToken(t, base, tidCust, tidCust, "many")
+	src := claims["_claim_sources"].(map[string]any)["src1"].(map[string]any)
+	if endpoint, _ := src["endpoint"].(string); !strings.HasPrefix(endpoint, "https://graph.microsoft.com/v1.0/users/") {
+		t.Errorf("overage endpoint = %q, want the real Graph", endpoint)
+	}
+}
+
+// login_hint works over HTTP end to end: one GET, no picker, straight to the
+// redirect with a code.
+func TestGraphEndToEndLoginHint(t *testing.T) {
+	_, base := startServer(t, entraGraphConfig)
+	target := base + "/entra/" + tidCorp + "/oauth2/v2.0/authorize?response_type=code&client_id=iam" +
+		"&redirect_uri=" + url.QueryEscape(entraRedirect) + "&state=st1&scope=openid" +
+		"&login_hint=" + url.QueryEscape("jane@corp.example")
+	status, hdr, body := do(t, http.MethodGet, target, "", nil)
+	if status != http.StatusFound {
+		t.Fatalf("status %d body %s", status, body)
+	}
+	loc, err := url.Parse(hdr.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := loc.Query().Get("code")
+	if code == "" {
+		t.Fatalf("no code in %s", loc)
+	}
+	// The code redeems for the hinted account.
+	st, tok, raw := entraRedeem(t, base, tidCorp, "iam", code, "", nil)
+	if st != http.StatusOK {
+		t.Fatalf("token status %d: %s", st, raw)
+	}
+	if claims := decodeClaims(t, tok["id_token"].(string)); claims["preferred_username"] != "jane@corp.example" {
+		t.Errorf("signed in as %v", claims["preferred_username"])
+	}
+}
