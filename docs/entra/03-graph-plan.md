@@ -34,6 +34,19 @@ section by section. Entra mode itself: [`00-design.md`](00-design.md), [`01-plan
   `go test ./...`; plus `go test -race ./...` before finishing.
 - US English in comments and docs. Commit messages end with `Co-authored by AI`.
 
+## Status
+
+**Implemented on 2026-10-11** (branch `docs/entra-graph-account-plan`), one commit per task. Two
+deviations from the plan as written, both recorded in the commits:
+
+- **Tasks 2 and 3 were committed in the other order.** Task 2's validator needs `Config.UserByOID`
+  and `User.Enabled`, which the plan placed in task 3, so the directory landed first.
+- **`graph.clockSkew` is an optional JSON number rather than a plain `int64`**, because task 2's
+  own `TestValidateAccessTokenClockSkew` has to express `clockSkew: 0`, which a
+  "default when `<= 0`" rule cannot.
+
+Task 6 made the one sanctioned assertion change, and nothing else in the existing suite moved.
+
 ## Review focus
 
 1. **`enabled: false` is a real off switch**, not a half-measure: no `userinfo_endpoint`, no
@@ -116,7 +129,7 @@ New `Config.Graph *GraphConfig`, new `Tenant.Groups []Group`, and on `User`: `Gi
 set, must name another user in the same tenant and must not be the user itself; `tenant.groups[]`
 names non-empty and unique per tenant, explicit `oid` lowercased and GUID-checked.
 
-- [ ] **Step 1: failing tests** in `graphconfig_test.go` and `config_test.go`
+- [x] **Step 1: failing tests** in `graphconfig_test.go` and `config_test.go`
   - `TestGraphConfigDefaults` — `{"graph":{}}` → on, basePath `graph`, overage `self`, userinfo on,
     appOnly off, 100/999/60.
   - `TestGraphOnWhenBlockAbsent` — a config with **no** `graph` key → `GraphOn()`, `UserInfoOn()`,
@@ -130,12 +143,12 @@ names non-empty and unique per tenant, explicit `oid` lowercased and GUID-checke
   - `TestTenantGroupsValidate` — duplicate group name rejected, bad explicit `oid` rejected.
   - `TestStoreClonesProfileFields` — `UpdateUser` with the new fields round-trips and the previous
     snapshot is unchanged (copy-on-write).
-- [ ] **Step 2: run to verify failure** — `go test ./internal/entra/ -run 'Graph|Profile|TenantGroups|StoreClones' -v`
-- [ ] **Step 3: implement** `graphconfig.go` and extend `config.go` / `store.go` (`cloneConfig` must
+- [x] **Step 2: run to verify failure** — `go test ./internal/entra/ -run 'Graph|Profile|TenantGroups|StoreClones' -v`
+- [x] **Step 3: implement** `graphconfig.go` and extend `config.go` / `store.go` (`cloneConfig` must
   deep-copy the new slices — `BusinessPhones`, `Roles`, `WIDs`, `Tenant.Groups`).
-- [ ] **Step 4: run** `go test ./internal/entra/ -v && gofmt -l internal/entra && go vet ./internal/entra/`
-- [ ] **Step 5: full suite** `go test ./...` — every existing test unmodified and green.
-- [ ] **Step 6: commit** `feat(entra): graph config block and richer account fixtures`
+- [x] **Step 4: run** `go test ./internal/entra/ -v && gofmt -l internal/entra && go vet ./internal/entra/`
+- [x] **Step 5: full suite** `go test ./...` — every existing test unmodified and green.
+- [x] **Step 6: commit** `feat(entra): graph config block and richer account fixtures`
 
 ---
 
@@ -173,7 +186,7 @@ Reuse `internal/token`'s hashing helpers; do **not** reuse `TokenProvider.Verify
 the per-issuer `KeyProvider`). If verification needs a public-key accessor on `SigningKey`, add it
 to `internal/token/sign.go` rather than reaching into the struct from `entra`.
 
-- [ ] **Step 1: failing tests**
+- [x] **Step 1: failing tests**
   - `TestKeySetVerifyRoundTrip`, `TestKeySetVerifyRejectsTamperedPayload`.
   - `TestKeySetVerifyAcceptsPreviousKeyUntilDropped` — sign, rotate once → still verifies; rotate
     twice → fails (the key is no longer published).
@@ -183,10 +196,10 @@ to `internal/token/sign.go` rather than reaching into the struct from `entra`.
     `nbf` in the future, `tid` of a deleted tenant, `oid` of a deleted user, disabled user.
   - `TestValidateAccessTokenClockSkew` — 30s-expired token passes with the default 60s skew, fails
     with `clockSkew: 0`.
-- [ ] **Step 2: run to verify failure**
-- [ ] **Step 3: implement** `verify.go`
-- [ ] **Step 4: run** `go test ./internal/entra/ -run 'Verify|ValidateAccessToken' -v`
-- [ ] **Step 5: commit** `feat(entra): validate our own Graph-audience access tokens`
+- [x] **Step 2: run to verify failure**
+- [x] **Step 3: implement** `verify.go`
+- [x] **Step 4: run** `go test ./internal/entra/ -run 'Verify|ValidateAccessToken' -v`
+- [x] **Step 5: commit** `feat(entra): validate our own Graph-audience access tokens`
 
 ---
 
@@ -217,7 +230,7 @@ func (u *User) PrincipalName(t *Tenant) string             // UPN, else today's 
 func mailNickname(name string) string                      // lowercase, non-alphanumerics dropped
 ```
 
-- [ ] **Step 1: failing tests**
+- [x] **Step 1: failing tests**
   - `TestGroupsInUnionOfDeclaredAndUsed` — a name only on a user appears with `description: ""`;
     declared metadata wins; result ordered by OID; no duplicates.
   - `TestGroupIDMatchesGroupClaim` — `GroupsOf(user)[i].OID == GroupObjectID(tid, name)`, and with
@@ -227,10 +240,10 @@ func mailNickname(name string) string                      // lowercase, non-alp
   - `TestGroupsAreTenantScoped` — the same group name in two tenants has different ids and disjoint
     members.
   - `TestManagerAndDirectReports`, `TestEnabledDefaultsTrue`, `TestPrincipalNameFallsBackToPreferredUsername`.
-- [ ] **Step 2: run to verify failure**
-- [ ] **Step 3: implement** `directory.go`
-- [ ] **Step 4: run** `go test ./internal/entra/ -v`
-- [ ] **Step 5: commit** `feat(entra): derive group entities and membership from the config`
+- [x] **Step 2: run to verify failure**
+- [x] **Step 3: implement** `directory.go`
+- [x] **Step 4: run** `go test ./internal/entra/ -v`
+- [x] **Step 5: commit** `feat(entra): derive group entities and membership from the config`
 
 ---
 
@@ -259,7 +272,7 @@ not; `businessPhones` renders `[]` and single-valued gaps render `null`; `$filte
 `$expand`/`$search`/`$count` → `400 Request_UnsupportedQuery`; an unknown `$select` property →
 `400 Request_UnsupportedQuery`; `id` survives any `$select`.
 
-- [ ] **Step 1: failing tests**
+- [x] **Step 1: failing tests**
   - `TestParseTopClampAndDefault` (table: absent, `0`, `-1`, `abc`, `5`, `5000`).
   - `TestParseSkipInvalidIsZero`.
   - `TestNextLinkPreservesQueryAndOverridesSkiptoken`, `TestNextLinkAbsentOnLastPage`.
@@ -269,10 +282,10 @@ not; `businessPhones` renders `[]` and single-valued gaps render `null`; `$filte
     `client-request-id`.
   - `TestGraphError401SetsWWWAuthenticate`.
   - `TestUnsupportedQueryOptions` (table over `$filter`, `$orderby`, `$expand`, `$search`, `$count`).
-- [ ] **Step 2: run to verify failure**
-- [ ] **Step 3: implement** `odata.go`
-- [ ] **Step 4: run** `go test ./internal/entra/ -run 'Top|Skip|NextLink|Select|GraphError|Unsupported' -v`
-- [ ] **Step 5: commit** `feat(entra): OData envelope, paging and Graph error bodies`
+- [x] **Step 2: run to verify failure**
+- [x] **Step 3: implement** `odata.go`
+- [x] **Step 4: run** `go test ./internal/entra/ -run 'Top|Skip|NextLink|Select|GraphError|Unsupported' -v`
+- [x] **Step 5: commit** `feat(entra): OData envelope, paging and Graph error bodies`
 
 ---
 
@@ -296,7 +309,7 @@ makes the switch honest. Every handler then: `h.ValidateAccessToken` → tenant 
 dispatch. Routes and shapes per design §5; `/me*` requires `caller.Kind == TokenDelegated`, else
 `403 Authorization_RequestDenied`.
 
-- [ ] **Step 1: failing unit tests** (`graph_test.go`, in-package, minting tokens through the
+- [x] **Step 1: failing unit tests** (`graph_test.go`, in-package, minting tokens through the
       handler's own `KeySet`)
   - `TestGraphMeShape` — all documented fields present, `null`/`[]` for gaps, `@odata.context` ends
     `$metadata#users/$entity`.
@@ -315,17 +328,17 @@ dispatch. Routes and shapes per design §5; `/me*` requires `caller.Kind == Toke
   - **`TestGraphTenantIsolation`** — a Corp token on `/users`, `/groups`, `/users/{customer oid}`,
     `/groups/{customer group id}`, `/groups/{customer group id}/members` sees only Corp (404 for
     cross-tenant ids, never another tenant's data).
-- [ ] **Step 2: failing e2e tests** (`internal/e2e/entra_graph_test.go`, new `entraGraphConfig`
+- [x] **Step 2: failing e2e tests** (`internal/e2e/entra_graph_test.go`, new `entraGraphConfig`
       const with `"graph": {}` and profile fields on `jane`/`sam`)
   - `TestGraphEndToEndMe` — authorize → redeem → `GET /entra/graph/v1.0/me` with the access token.
   - `TestGraphRejectsIDToken` — the `id_token` as a Bearer → 401 (wrong `aud`).
   - **`TestGraphHonorsForwardedHeaders`** — with `x-forwarded-proto/port`, `@odata.context` and
     `@odata.nextLink` carry the forwarded origin, and the token minted under those headers
     validates (and one minted without them does not).
-- [ ] **Step 3: run to verify failure**
-- [ ] **Step 4: implement** `graph.go` and the `handler.go` branch
-- [ ] **Step 5: run** `go test ./internal/entra/ ./internal/e2e/ -v`
-- [ ] **Step 6: commit** `feat(entra): read-only Graph account endpoints`
+- [x] **Step 3: run to verify failure**
+- [x] **Step 4: implement** `graph.go` and the `handler.go` branch
+- [x] **Step 5: run** `go test ./internal/entra/ ./internal/e2e/ -v`
+- [x] **Step 6: commit** `feat(entra): read-only Graph account endpoints`
 
 ---
 
@@ -341,7 +354,7 @@ assertion that the field equals `base + "/entra/graph/oidc/userinfo"`, and chang
 that test or any other. If a second existing assertion goes red in this task, stop and fix the
 gating instead.
 
-- [ ] **Step 1: failing tests**
+- [x] **Step 1: failing tests**
   - `TestUserInfoClaims` — `sub` equals the token's `sub` (pairwise), plus `oid`, `tid`, `name`,
     `preferred_username`, and `given_name`/`family_name`/`email` when set; absent when not.
   - `TestUserInfoPostMatchesGet`, `TestUserInfoNoStore` (`Cache-Control: no-store`).
@@ -350,11 +363,11 @@ gating instead.
   - `TestDiscoveryAdvertisesUserInfoByDefault` — no `graph` block at all → the field is present
     and fetchable.
   - `TestDiscoveryOmitsUserInfoWhenDisabled` — `"userinfo":false`, and `"enabled":false`.
-- [ ] **Step 2: run to verify failure**
-- [ ] **Step 3: implement** `userinfo.go`, extend `discovery`
-- [ ] **Step 4: update the one sanctioned assertion** in `TestEntraDiscoveryPerTenant`
-- [ ] **Step 5: run** `go test ./...` and confirm the only existing test touched is that one
-- [ ] **Step 6: commit** `feat(entra): OIDC userinfo endpoint`
+- [x] **Step 2: run to verify failure**
+- [x] **Step 3: implement** `userinfo.go`, extend `discovery`
+- [x] **Step 4: update the one sanctioned assertion** in `TestEntraDiscoveryPerTenant`
+- [x] **Step 5: run** `go test ./...` and confirm the only existing test touched is that one
+- [x] **Step 6: commit** `feat(entra): OIDC userinfo endpoint`
 
 ---
 
@@ -373,7 +386,7 @@ dropped; `azp`/`appid` on the access token;
 `TokenInput` gains the fields the overage URL needs (`GraphBase string`, `OverageSelf bool`) — keep
 `IDTokenClaims`/`AccessTokenClaims` pure functions of their input.
 
-- [ ] **Step 1: failing tests**
+- [x] **Step 1: failing tests**
   - `TestOverageEndpointPointsAtSelfByDefault` / `…AtMicrosoftWhenConfigured` / `…WhenGraphDisabled`.
   - `TestScpStripsResourcePrefixAndDropsOfflineAccess` — `openid offline_access
     https://graph.microsoft.com/User.Read` → `scp: "openid User.Read"`, response `scope` unchanged.
@@ -383,11 +396,11 @@ dropped; `azp`/`appid` on the access token;
   - **e2e `TestGraphResolvesGroupOverage`** — sign in as a user over the group limit, read
     `_claim_sources.src1.endpoint` out of the real ID token, POST it with the issued access token,
     and compare the ids to `/_entra/groups`.
-- [ ] **Step 2: run to verify failure**
-- [ ] **Step 3: implement**
-- [ ] **Step 4: run** `go test ./...` — `TestGroupOverageBoundary`, `TestAccessTokenClaims` and
+- [x] **Step 2: run to verify failure**
+- [x] **Step 3: implement**
+- [x] **Step 4: run** `go test ./...` — `TestGroupOverageBoundary`, `TestAccessTokenClaims` and
       every other existing test still pass **unmodified**.
-- [ ] **Step 5: commit** `feat(entra): resolve group overage locally and tighten token claims`
+- [x] **Step 5: commit** `feat(entra): resolve group overage locally and tighten token claims`
 
 ---
 
@@ -405,7 +418,7 @@ the hint resolves, else redirects `interaction_required` with AADSTS50058.
 The hint matches on UPN, email, or username, case-insensitively. Error injection still applies
 **after** the shortcut — a hinted `mfa` user must still produce `interaction_required`.
 
-- [ ] **Step 1: failing tests**
+- [x] **Step 1: failing tests**
   - `TestLoginHintAutoIssuesCode`, `TestLoginHintAmbiguousShowsPicker`,
     `TestLoginHintUnknownShowsPickerPrefilled`, `TestLoginHintRespectsPromptSelectAccount`,
     `TestIgnoreLoginHintForcesPicker`.
@@ -417,10 +430,10 @@ The hint matches on UPN, email, or username, case-insensitively. Error injection
     `"graph": {"enabled": false}`: `/entra/graph/v1.0/me` → `AADSTS90002`, discovery has no
     `userinfo_endpoint`, `client_credentials` → `unsupported_grant_type`, and the overage endpoint
     is the Microsoft URL.
-- [ ] **Step 2: run to verify failure**
-- [ ] **Step 3: implement**
-- [ ] **Step 4: run** `go test ./...`
-- [ ] **Step 5: commit** `feat(entra): login_hint, domain_hint and prompt handling`
+- [x] **Step 2: run to verify failure**
+- [x] **Step 3: implement**
+- [x] **Step 4: run** `go test ./...`
+- [x] **Step 5: commit** `feat(entra): login_hint, domain_hint and prompt handling`
 
 ---
 
@@ -433,16 +446,16 @@ Per design §8. `Config.Apps []App{ClientID, TID, Roles}` supplies `roles`; any 
 accepted. The grant stays rejected unless `graph.appOnly` is on — a deliberate default (it changes
 who can get a token at all), and the reason `TestEntraUnsupportedGrantIsEntraError` stays green.
 
-- [ ] **Step 1: failing tests**
+- [x] **Step 1: failing tests**
   - `TestClientCredentialsRejectedUnlessEnabled`.
   - `TestAppOnlyTokenClaims` — `tid` from the path, `sub`/`azp`/`appid` = `client_id`, `roles` from
     config, **no** `oid`, **no** `scp`, `aud` = Graph.
   - `TestAppOnlyTokenOnMultiTenantPathIsRejected`.
   - `TestAppOnlyReadsUsersAndGroupsButNotMe` — 200, 200, 403 `Authorization_RequestDenied`.
-- [ ] **Step 2: run to verify failure**
-- [ ] **Step 3: implement**
-- [ ] **Step 4: run** `go test ./...`
-- [ ] **Step 5: commit** `feat(entra): app-only client_credentials tokens for Graph reads`
+- [x] **Step 2: run to verify failure**
+- [x] **Step 3: implement**
+- [x] **Step 4: run** `go test ./...`
+- [x] **Step 5: commit** `feat(entra): app-only client_credentials tokens for Graph reads`
 
 ---
 
@@ -452,25 +465,25 @@ who can get a token at all), and the reason `TestEntraUnsupportedGrantIsEntraErr
 `internal/adminui/*.go`, `internal/adminui/static/*`, `entra-demo.json`, `README.md`,
 `docs/entra/00-design.md`, `docs/entra/02-graph-design.md` (status), `CLAUDE.md`.
 
-- [ ] **Step 1** Admin UI: the new account fields in the user form (given/surname, UPN,
+- [x] **Step 1** Admin UI: the new account fields in the user form (given/surname, UPN,
       accountEnabled, jobTitle, officeLocation, phones, preferredLanguage, roles, wids, manager) and
       tenant group metadata. Mutations keep going through `store.mutate` so `normalize` re-runs.
-- [ ] **Step 2** A `graph` settings toggle alongside `entra`, serving 404s while off, and
+- [x] **Step 2** A `graph` settings toggle alongside `entra`, serving 404s while off, and
       `AdminSnapshot` reporting the Graph state.
-- [ ] **Step 3** Test API: `GET /_entra/users?tid=` (the directory as Graph sees it) and
+- [x] **Step 3** Test API: `GET /_entra/users?tid=` (the directory as Graph sees it) and
       `POST /_entra/mint-token {tid, username, clientId, scope}` → a usable access token, so an RP
       test suite can exercise Graph without driving the picker. Document that it is a test-only
       endpoint, like the rest of `/_entra/`.
-- [ ] **Step 4** `entra-demo.json`: give the demo users full profiles, a manager chain and group
+- [x] **Step 4** `entra-demo.json`: give the demo users full profiles, a manager chain and group
       metadata, and keep one over-limit user for the overage demo. No `"graph"` block is needed —
       show the `{"enabled": false}` form in a comment-free sibling example in the README instead.
-- [ ] **Step 5** README: a "Graph account API" section with `curl` examples (sign in → token →
+- [x] **Step 5** README: a "Graph account API" section with `curl` examples (sign in → token →
       `/me` → `/me/memberOf` → `getMemberObjects`), the supported query options, and the documented
       divergences. Update `00-design.md` §Non-goals and §3 to point at `02-graph-design.md`, flip
       that doc's status to Implemented, and update the `CLAUDE.md` "Current work" pointer.
-- [ ] **Step 6** Full gates: `gofmt -l . | grep -v '^docs/'` empty, `go vet ./...`,
+- [x] **Step 6** Full gates: `gofmt -l . | grep -v '^docs/'` empty, `go vet ./...`,
       `go build ./...`, `go test ./...`, **`go test -race ./...`**.
-- [ ] **Step 7: commit** `docs(entra): document the Graph account API; wire the admin UI and demo config`
+- [x] **Step 7: commit** `docs(entra): document the Graph account API; wire the admin UI and demo config`
 
 ---
 

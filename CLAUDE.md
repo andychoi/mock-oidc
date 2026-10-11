@@ -3,13 +3,22 @@
 Native Go port of navikt/mock-oauth2-server 6.0.2: a shared dev/test OIDC provider (see `README.md`).
 Module `github.com/andychoi/mock-oidc`, Go 1.27, stdlib only (plus `go-pkcs12`).
 
-## Current work: Entra mode
+## Entra mode
 
 Opt-in Microsoft Entra ID emulation, needed by the IAM project (`../iam`, ADR-0007) because no real
-Entra test tenant exists.
+Entra test tenant exists. Both phases are implemented; read the design before changing either.
 
-1. Read the design: [`docs/entra/00-design.md`](docs/entra/00-design.md)
-2. Implement task by task: [`docs/entra/01-plan.md`](docs/entra/01-plan.md) (checkboxes track progress)
+1. Sign-in and tokens: [`docs/entra/00-design.md`](docs/entra/00-design.md),
+   plan [`docs/entra/01-plan.md`](docs/entra/01-plan.md)
+2. Account Graph API, `userinfo`, selection hints, app-only tokens:
+   [`docs/entra/02-graph-design.md`](docs/entra/02-graph-design.md),
+   plan [`docs/entra/03-graph-plan.md`](docs/entra/03-graph-plan.md)
+
+The Graph surface (`internal/entra/graph.go`, `odata.go`, `verify.go`, `directory.go`) is on
+whenever Entra mode is, mounted on a reserved segment of the same front route and scoped by the
+caller's token rather than by the path. Graph error bodies must **not** go through
+`routing.ErrorResponse`, which lowercases bodies for navikt compatibility and would destroy
+PascalCase codes such as `InvalidAuthenticationToken`.
 
 ## Admin UI (`internal/adminui`)
 

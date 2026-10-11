@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Proposed (2026-10-11). Plan: [`03-graph-plan.md`](03-graph-plan.md) |
+| Status | Implemented (2026-10-11). Plan: [`03-graph-plan.md`](03-graph-plan.md) |
 | Builds on | [`00-design.md`](00-design.md) (Entra mode), which lists Microsoft Graph as a non-goal. This design lifts that non-goal for the **account-related** surface only |
 | Benchmarked against | [`cmaneu/entra-local`](https://github.com/cmaneu/entra-local) (TypeScript/Fastify + SQLite, ~54k lines), [`nazriel/ms-oidc-mock`](https://github.com/nazriel/ms-oidc-mock) (Rust/axum, ~8.6k lines) |
 | Hard constraints | Opt-in and additive. No new module dependencies. Every existing test passes **unmodified** |
@@ -168,7 +168,7 @@ grant has its own contract.
 | `graph.userinfo` | `true` | serve **and advertise** `userinfo_endpoint` in discovery |
 | `graph.appOnly` | `false` | enable the `client_credentials` grant (app-only Graph tokens) |
 | `graph.defaultPageSize` / `maxPageSize` | 100 / 999 | `$top` default and clamp |
-| `graph.clockSkew` | 60 (seconds) | leeway on `exp`/`nbf` when validating a Bearer token |
+| `graph.clockSkew` | 60 (seconds) | leeway on `exp`/`nbf` when validating a Bearer token. Optional in the JSON, so an explicit `0` means no leeway at all; a negative value is rejected |
 | `tenant.groups[]` | derived | metadata (`description`, `mailNickname`, `securityEnabled`, `mailEnabled`, explicit `oid`) for a group name; names used by a user but not declared are auto-created |
 | `user.givenName`, `surname` | — | `given_name` / `family_name` claims and Graph fields |
 | `user.upn` | `preferred_username` rule | Graph `userPrincipalName`; also overrides `preferred_username` when set |

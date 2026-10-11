@@ -21,6 +21,7 @@ func (h *Handler) AdminSnapshot() any {
 			{Name: "groupClaimFormat", V: t.GroupClaimFormat},
 			{Name: "groupLimit", V: t.GroupLimit},
 			{Name: "consentRequired", V: t.ConsentRequired},
+			{Name: "groups", V: tenantGroups(t)},
 		})
 	}
 	users := jsonx.Arr{}
@@ -35,6 +36,18 @@ func (h *Handler) AdminSnapshot() any {
 			{Name: "amr", V: u.AMR},
 			{Name: "admin", V: u.Admin},
 			{Name: "error", V: u.Error},
+			{Name: "givenName", V: u.GivenName},
+			{Name: "surname", V: u.Surname},
+			{Name: "upn", V: u.UPN},
+			{Name: "accountEnabled", V: u.Enabled()},
+			{Name: "jobTitle", V: u.JobTitle},
+			{Name: "officeLocation", V: u.OfficeLocation},
+			{Name: "businessPhones", V: u.BusinessPhones},
+			{Name: "mobilePhone", V: u.MobilePhone},
+			{Name: "preferredLanguage", V: u.PreferredLanguage},
+			{Name: "roles", V: u.Roles},
+			{Name: "wids", V: u.WIDs},
+			{Name: "manager", V: u.Manager},
 		})
 	}
 	consents := jsonx.Arr{}
@@ -44,10 +57,27 @@ func (h *Handler) AdminSnapshot() any {
 			{Name: "tid", V: c.TID},
 		})
 	}
+	apps := jsonx.Arr{}
+	for _, a := range cfg.Apps {
+		apps = append(apps, jsonx.Obj{
+			{Name: "clientId", V: a.ClientID},
+			{Name: "tid", V: a.TID},
+			{Name: "roles", V: a.Roles},
+		})
+	}
 	return jsonx.Obj{
 		{Name: "basePath", V: cfg.BasePath},
 		{Name: "defaultGroupLimit", V: cfg.DefaultGroupLimit},
 		{Name: "tokenExpiry", V: cfg.TokenExpiry},
+		{Name: "ignoreLoginHint", V: cfg.IgnoreLoginHint},
+		{Name: "graph", V: jsonx.Obj{
+			{Name: "enabled", V: cfg.GraphOn()},
+			{Name: "basePath", V: cfg.GraphBase()},
+			{Name: "userinfo", V: cfg.UserInfoOn()},
+			{Name: "appOnly", V: cfg.AppOnlyOn()},
+			{Name: "overageSelfHosted", V: cfg.OverageSelfHosted()},
+		}},
+		{Name: "apps", V: apps},
 		{Name: "tenants", V: tenants},
 		{Name: "users", V: users},
 		{Name: "consents", V: consents},
@@ -57,6 +87,30 @@ func (h *Handler) AdminSnapshot() any {
 		}},
 	}
 }
+
+// tenantGroups renders a tenant's groups as the Graph surface sees them, so
+// the admin UI can show the object ID a group claim will carry.
+func tenantGroups(t Tenant) jsonx.Arr {
+	out := jsonx.Arr{}
+	for _, g := range t.Groups {
+		oid := g.OID
+		if oid == "" {
+			oid = GroupObjectID(t.TID, g.Name)
+		}
+		out = append(out, jsonx.Obj{
+			{Name: "name", V: g.Name},
+			{Name: "description", V: g.Description},
+			{Name: "oid", V: oid},
+		})
+	}
+	return out
+}
+
+// AdminGraphEnabled reports whether the Graph surface is serving.
+func (h *Handler) AdminGraphEnabled() bool { return h.conf().GraphOn() }
+
+// AdminSetGraphEnabled turns the Graph surface on or off at runtime.
+func (h *Handler) AdminSetGraphEnabled(v bool) error { return h.store.SetGraphEnabled(v) }
 
 // AdminCreateTenant adds a tenant (validation errors return as-is).
 func (h *Handler) AdminCreateTenant(t Tenant) error { return h.store.CreateTenant(t) }

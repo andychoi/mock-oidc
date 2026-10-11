@@ -3,6 +3,7 @@
 | | |
 |---|---|
 | Status | Implemented (2026-09-26). Plan: [`01-plan.md`](01-plan.md) |
+| Extended by | [`02-graph-design.md`](02-graph-design.md): the account Graph API, OIDC `userinfo`, account-selection hints and app-only tokens (implemented 2026-10-11) |
 | Origin | IAM project (`../iam`): ADR-0007 and `docs/idea/01-mock-oidc-entra-mode.md`. There is no Microsoft Entra ID test tenant, so this mock *is* the Entra test environment for the IAM's Entra connector |
 | Hard constraint | **Opt-in and additive.** With no Entra config, the server behaves byte-for-byte as today (navikt 6.0.2 contract C1–C9 in [`../plan/00-overview.md`](../plan/00-overview.md)); all existing tests stay green unchanged |
 | Dependencies | **None new.** stdlib + existing internal packages |
@@ -26,7 +27,13 @@ end-to-end against **several Entra tenants**, including:
 Real Conditional Access evaluation; Microsoft's UI and exact error wording; app registrations
 (any `client_id`/secret is accepted, as in the rest of mock-oidc); refresh-token redemption; implicit
 and hybrid flows (`response_type` other than `code`); `form_post`/`fragment` response modes; tenant
-lookup by domain name in the path; Microsoft Graph (`userinfo`, `getMemberObjects`); SAML/WS-Fed.
+lookup by domain name in the path; SAML/WS-Fed.
+
+**No longer non-goals.** The account-related part of Microsoft Graph, `userinfo` and
+`getMemberObjects` are now emulated — see [`02-graph-design.md`](02-graph-design.md), which also
+supersedes this document's "no `userinfo_endpoint`" decision (§3.1) and its `graph.microsoft.com`
+overage endpoint (§4.2). Graph writes, `$filter`, nested groups and the non-account Graph surface
+remain out of scope.
 
 ## 2. Architecture
 

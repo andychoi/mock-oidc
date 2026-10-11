@@ -496,3 +496,54 @@ func TestGraphEndToEndAppOnly(t *testing.T) {
 		t.Errorf("app-only /me = %d %v, want 403", st, me)
 	}
 }
+
+// The /_entra helpers let a relying-party test suite work with Graph without
+// driving the picker.
+func TestGraphTestAPIHelpers(t *testing.T) {
+	_, base := startServer(t, entraGraphConfig)
+
+	// The directory as Graph sees it.
+	status, _, raw := do(t, http.MethodGet, base+"/entra/_entra/users?tid="+tidCorp, "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("users status %d: %s", status, raw)
+	}
+	var users []map[string]any
+	if err := json.Unmarshal([]byte(raw), &users); err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("users = %d, want the corp accounts", len(users))
+	}
+	for _, u := range users {
+		if u["oid"] == nil || u["userPrincipalName"] == nil || u["accountEnabled"] != true {
+			t.Errorf("user = %v", u)
+		}
+	}
+	// An unknown tenant is rejected rather than returning everything.
+	if st, _, _ := do(t, http.MethodGet, base+"/entra/_entra/users?tid=99999999-9999-9999-9999-999999999999", "", nil); st != http.StatusBadRequest {
+		t.Errorf("unknown tid = %d", st)
+	}
+
+	// mint-token: a usable Graph credential in one call.
+	status, _, raw = do(t, http.MethodPost, base+"/entra/_entra/mint-token",
+		"tid="+tidCorp+"&username=jane", formHeaders)
+	if status != http.StatusOK {
+		t.Fatalf("mint-token status %d: %s", status, raw)
+	}
+	var tok map[string]any
+	if err := json.Unmarshal([]byte(raw), &tok); err != nil {
+		t.Fatal(err)
+	}
+	at, ok := tok["access_token"].(string)
+	if !ok || tok["id_token"] == nil {
+		t.Fatalf("mint-token body = %s", raw)
+	}
+	st, _, me := graphCall(t, http.MethodGet, base+"/entra/graph/v1.0/me", at, "")
+	if st != http.StatusOK || me["displayName"] != "Jane Kim" {
+		t.Errorf("minted token on /me = %d %v", st, me)
+	}
+	// Unknown and disabled accounts are refused.
+	if st, _, _ := do(t, http.MethodPost, base+"/entra/_entra/mint-token", "tid="+tidCorp+"&username=nobody", formHeaders); st != http.StatusBadRequest {
+		t.Errorf("unknown user = %d", st)
+	}
+}
