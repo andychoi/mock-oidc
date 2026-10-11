@@ -11,6 +11,9 @@ import (
 	"github.com/andychoi/mock-oidc/internal/routing"
 )
 
+// testAPISegment is the reserved first segment of the test-helper API.
+const testAPISegment = "_entra"
+
 // Handler serves every Entra mode endpoint under /{basePath}/.
 type Handler struct {
 	seed     *Config // the immutable startup config (basePath, consent seed)
@@ -62,7 +65,7 @@ func (h *Handler) Handle(req *oauth2.Request) routing.Response {
 	if len(segs) < 3 {
 		return routing.NotFound("not found")
 	}
-	if segs[1] == "_entra" {
+	if segs[1] == testAPISegment {
 		return h.testAPI(req, strings.Join(segs[2:], "/"))
 	}
 	sc, oerr := h.resolveScope(segs[1])
