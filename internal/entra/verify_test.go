@@ -2,7 +2,7 @@ package entra
 
 import (
 	"net/http"
-	"net/url"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -34,19 +34,19 @@ func verifyHandler(t *testing.T, cfgJSON string) (*Handler, *oauth2.Request) {
 	return h, graphRequest(t, "http://mock.test/entra/graph/v1.0/me", "")
 }
 
-// graphRequest builds a GET request with an optional Authorization header.
+// graphRequest builds a GET request the way the router delivers one, so the
+// scheme and host behind ProxyAwareURL are real.
 func graphRequest(t *testing.T, raw, bearer string) *oauth2.Request {
 	t.Helper()
-	u, err := url.Parse(raw)
+	r := httptest.NewRequest(http.MethodGet, raw, nil)
+	if bearer != "" {
+		r.Header.Set("Authorization", bearer)
+	}
+	req, err := oauth2.FromHTTPRequest(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hdr := http.Header{"Host": []string{u.Host}}
-	if bearer != "" {
-		hdr.Set("Authorization", bearer)
-	}
-	path := &url.URL{Path: u.Path, RawQuery: u.RawQuery}
-	return &oauth2.Request{Method: http.MethodGet, Header: hdr, URL: path}
+	return req
 }
 
 // mintAccess signs an access token for a user, the way the token endpoint does.
