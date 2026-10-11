@@ -224,6 +224,7 @@ func (s *Server) AdminSettings() adminui.AdminSettings {
 		RotateRefreshToken: s.settings.rotateRefreshToken.Load(),
 		EntraConfigured:    s.config.Entra != nil,
 		EntraEnabled:       s.settings.entraEnabled.Load(),
+		GraphEnabled:       s.entra != nil && s.entra.AdminGraphEnabled(),
 	}
 }
 
@@ -239,6 +240,14 @@ func (s *Server) AdminSetSetting(name string, value bool) error {
 			return errEntraNotConfigured
 		}
 		s.settings.entraEnabled.Store(value)
+	case "graph":
+		if s.entra == nil {
+			return errEntraNotConfigured
+		}
+		// The Graph toggle lives in the entra config store rather than an
+		// atomic here, so it publishes through the same copy-on-write path as
+		// every other runtime edit and Reset undoes it.
+		return s.entra.AdminSetGraphEnabled(value)
 	default:
 		return fmt.Errorf("unknown setting %q", name)
 	}

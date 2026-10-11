@@ -79,3 +79,124 @@ func TestParseConfigRejects(t *testing.T) {
 		})
 	}
 }
+
+const profileJSON = `{
+  "tenants": [
+    {"tid": "11111111-1111-1111-1111-111111111111", "domains": ["corp.example"],
+     "groups": [{"name": "AMS Engineers", "description": "Engineering", "securityEnabled": true}]}
+  ],
+  "apps": [{"clientId": "sync", "tid": "11111111-1111-1111-1111-111111111111", "roles": ["User.Read.All"]}],
+  "users": [
+    {"username": "jane", "tid": "11111111-1111-1111-1111-111111111111",
+     "givenName": "Jane", "surname": "Kim", "upn": "Jane@Corp.Example",
+     "accountEnabled": false, "jobTitle": "Staff Engineer", "officeLocation": "Seoul",
+     "businessPhones": ["+82-2-555-0100"], "mobilePhone": "+82-10-555-0101",
+     "preferredLanguage": "en-US", "roles": ["Portal.Admin"],
+     "wids": ["62E90394-69F5-4237-9190-012177145E10"], "groups": ["AMS Engineers"]},
+    {"username": "sora", "tid": "11111111-1111-1111-1111-111111111111", "manager": "jane"}
+  ]
+}`
+
+func TestUserProfileFieldsNormalize(t *testing.T) {
+	c, err := ParseConfig([]byte(profileJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jane := c.User(tidA, "jane")
+	if jane.UPN != "jane@corp.example" {
+		t.Errorf("upn = %q, want lowercased", jane.UPN)
+	}
+	if jane.WIDs[0] != "62e90394-69f5-4237-9190-012177145e10" {
+		t.Errorf("wids = %v, want lowercased", jane.WIDs)
+	}
+	if jane.GivenName != "Jane" || jane.Surname != "Kim" || jane.JobTitle != "Staff Engineer" ||
+		jane.OfficeLocation != "Seoul" || jane.MobilePhone != "+82-10-555-0101" ||
+		jane.PreferredLanguage != "en-US" || len(jane.BusinessPhones) != 1 || len(jane.Roles) != 1 {
+		t.Errorf("profile = %+v", jane)
+	}
+	if jane.AccountEnabled == nil || *jane.AccountEnabled {
+		t.Errorf("accountEnabled must round-trip false, got %v", jane.AccountEnabled)
+	}
+	if sora := c.User(tidA, "sora"); sora.AccountEnabled != nil {
+		t.Errorf("an unset accountEnabled must stay nil, got %v", *sora.AccountEnabled)
+	}
+	if len(c.Apps) != 1 || c.Apps[0].ClientID != "sync" || c.Apps[0].Roles[0] != "User.Read.All" {
+		t.Errorf("apps = %+v", c.Apps)
+	}
+}
+
+func TestProfileAndGroupRejects(t *testing.T) {
+	const one = `{"tid": "11111111-1111-1111-1111-111111111111"}`
+	user := func(extra string) string {
+		return `{"tenants": [` + one + `], "users": [{"username": "x",
+			"tid": "11111111-1111-1111-1111-111111111111"` + extra + `}]}`
+	}
+	cases := map[string]string{
+		"bad wid":         user(`, "wids": ["not-a-guid"]`),
+		"unknown manager": user(`, "manager": "nobody"`),
+		"self manager":    user(`, "manager": "x"`),
+		"group no name":   `{"tenants": [{"tid": "11111111-1111-1111-1111-111111111111", "groups": [{"description": "d"}]}]}`,
+		"duplicate group": `{"tenants": [{"tid": "11111111-1111-1111-1111-111111111111", "groups": [{"name": "G"}, {"name": "G"}]}]}`,
+		"bad group oid":   `{"tenants": [{"tid": "11111111-1111-1111-1111-111111111111", "groups": [{"name": "G", "oid": "nope"}]}]}`,
+		"app no client":   `{"tenants": [` + one + `], "apps": [{"roles": ["a"]}]}`,
+		"app unknown tid": `{"tenants": [` + one + `], "apps": [{"clientId": "a", "tid": "22222222-2222-2222-2222-222222222222"}]}`,
+		"unknown profile": user(`, "given_name": "x"`),
+	}
+	for name, js := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseConfig([]byte(js)); err == nil {
+				t.Fatalf("expected an error for %s", js)
+			}
+		})
+	}
+}
+
+// A manager reference must not survive its target's deletion as a dangling
+// pointer, nor make the delete fail validation.
+func TestManagerClearedWhenManagerDeleted(t *testing.T) {
+	c, err := ParseConfig([]byte(profileJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(c)
+	if err := s.DeleteUser(tidA, "jane"); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	if got := s.Snapshot().User(tidA, "sora").Manager; got != "" {
+		t.Errorf("manager = %q, want cleared", got)
+	}
+}
+
+func TestStoreClonesProfileFields(t *testing.T) {
+	c, err := ParseConfig([]byte(profileJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(c)
+	before := s.Snapshot()
+	jane := *before.User(tidA, "jane")
+	updated := jane
+	updated.JobTitle = "Principal Engineer"
+	updated.BusinessPhones = []string{"+82-2-555-0999"}
+	updated.AccountEnabled = nil
+	if err := s.UpdateUser(tidA, "jane", updated); err != nil {
+		t.Fatalf("UpdateUser: %v", err)
+	}
+	after := s.Snapshot()
+	if after.User(tidA, "jane").JobTitle != "Principal Engineer" {
+		t.Error("the update did not publish")
+	}
+	// The previously published snapshot must be untouched.
+	old := before.User(tidA, "jane")
+	if old.JobTitle != "Staff Engineer" || old.BusinessPhones[0] != "+82-2-555-0100" ||
+		old.AccountEnabled == nil || *old.AccountEnabled {
+		t.Errorf("the earlier snapshot was mutated: %+v", old)
+	}
+	// Tenant group metadata and the graph block are copied, not shared.
+	if before.Tenants[0].Groups[0].SecurityEnabled == after.Tenants[0].Groups[0].SecurityEnabled {
+		t.Error("group flags share a pointer across snapshots")
+	}
+	if before.Graph == after.Graph {
+		t.Error("the graph block is shared across snapshots")
+	}
+}

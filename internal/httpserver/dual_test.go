@@ -76,9 +76,11 @@ func TestDualServesPlainAndTLS(t *testing.T) {
 	}
 	defer ln.Close()
 	dual := Dual(ln, setup.Config)
-	go func() { _ = http.Serve(dual, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "ok")
-	})) }()
+	go func() {
+		_ = http.Serve(dual, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "ok")
+		}))
+	}()
 
 	plain := &http.Client{Timeout: 5 * time.Second}
 	resp, err := plain.Get("http://" + ln.Addr().String() + "/")
@@ -120,9 +122,11 @@ func TestDualSilentClientDoesNotStallAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	go func() { _ = http.Serve(Dual(ln, setup.Config), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "ok")
-	})) }()
+	go func() {
+		_ = http.Serve(Dual(ln, setup.Config), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "ok")
+		}))
+	}()
 
 	silent, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -202,9 +206,11 @@ func TestDualCloseWithoutResolving(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	go func() { _ = http.Serve(Dual(ln, setup.Config), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "ok")
-	})) }()
+	go func() {
+		_ = http.Serve(Dual(ln, setup.Config), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, "ok")
+		}))
+	}()
 
 	dead, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {

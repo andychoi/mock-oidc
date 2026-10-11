@@ -78,8 +78,11 @@ func TestEntraDiscoveryPerTenant(t *testing.T) {
 			t.Errorf("%s = %v, want %v", k, doc[k], v)
 		}
 	}
-	if _, ok := doc["userinfo_endpoint"]; ok {
-		t.Error("userinfo_endpoint must be absent")
+	// Graph is on with Entra mode, so discovery advertises the emulated
+	// UserInfo endpoint. It used to be absent, when there was nowhere to
+	// point it: see docs/entra/02-graph-design.md section 9.
+	if doc["userinfo_endpoint"] != base+"/entra/graph/oidc/userinfo" {
+		t.Errorf("userinfo_endpoint = %v", doc["userinfo_endpoint"])
 	}
 }
 

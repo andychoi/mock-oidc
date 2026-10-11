@@ -125,3 +125,61 @@ func TestConcurrentSignInsRotationAndConsent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// accountEnabled: false must fail redemption exactly like error:
+// "invalid_grant", so a disabled account needs no error-injection knowledge.
+func TestDisabledAccountFailsTokenEndpoint(t *testing.T) {
+	cfg := mustConfig(t, `{
+	  "tenants": [{"tid": "`+tidA+`"}],
+	  "users": [
+	    {"username": "jane", "tid": "`+tidA+`"},
+	    {"username": "off", "tid": "`+tidA+`", "accountEnabled": false},
+	    {"username": "injected", "tid": "`+tidA+`", "error": "invalid_grant"}
+	  ]}`)
+	h := New(cfg)
+	for _, username := range []string{"off", "injected"} {
+		t.Run(username, func(t *testing.T) {
+			// A disabled account still reaches the code: Entra fails it at
+			// redemption, which is what an RP has to handle.
+			authorize := "http://mock.test/entra/" + tidA + "/oauth2/v2.0/authorize?response_type=code" +
+				"&client_id=app&redirect_uri=" + url.QueryEscape("http://app.test/cb") + "&scope=openid"
+			resp := serve(h, http.MethodPost, authorize, "tid="+tidA+"&username="+username)
+			if resp.Status != http.StatusFound {
+				t.Fatalf("sign-in status %d: %s", resp.Status, resp.Body)
+			}
+			loc, err := url.Parse(resp.Header.Get("Location"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			code := loc.Query().Get("code")
+			if code == "" {
+				t.Fatalf("no code in %s", loc)
+			}
+			form := "grant_type=authorization_code&client_id=app&code=" + url.QueryEscape(code) +
+				"&redirect_uri=" + url.QueryEscape("http://app.test/cb")
+			tok := serve(h, http.MethodPost, "http://mock.test/entra/"+tidA+"/oauth2/v2.0/token", form)
+			if tok.Status != http.StatusBadRequest || !strings.Contains(tok.Body, "aadsts50057") {
+				t.Fatalf("token status %d: %s", tok.Status, tok.Body)
+			}
+		})
+	}
+}
+
+// httptestNewForm builds a form POST for tests that need to set headers on it
+// before handing it to the handler.
+func httptestNewForm(t *testing.T, target, form string) *http.Request {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	return r
+}
+
+// mustRequest normalizes an http.Request the way the router does.
+func mustRequest(t *testing.T, r *http.Request) *oauth2.Request {
+	t.Helper()
+	req, err := oauth2.FromHTTPRequest(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}

@@ -37,12 +37,24 @@ const (
 // Config is the Entra mode configuration (the "entra" JSON block or the file
 // at ENTRA_CONFIG_PATH).
 type Config struct {
-	BasePath          string    `json:"basePath"`
-	DefaultGroupLimit int       `json:"defaultGroupLimit"`
-	TokenExpiry       int64     `json:"tokenExpiry"`
-	Tenants           []Tenant  `json:"tenants"`
-	Consents          []Consent `json:"consents"`
-	Users             []User    `json:"users"`
+	BasePath          string       `json:"basePath"`
+	DefaultGroupLimit int          `json:"defaultGroupLimit"`
+	TokenExpiry       int64        `json:"tokenExpiry"`
+	IgnoreLoginHint   bool         `json:"ignoreLoginHint"`
+	Graph             *GraphConfig `json:"graph"`
+	Tenants           []Tenant     `json:"tenants"`
+	Consents          []Consent    `json:"consents"`
+	Apps              []App        `json:"apps"`
+	Users             []User       `json:"users"`
+}
+
+// App is an optional client registration. Entra mode accepts any client_id on
+// every flow; an entry here only supplies the app roles an app-only token
+// carries (§8 of the Graph design).
+type App struct {
+	ClientID string   `json:"clientId"`
+	TID      string   `json:"tid"`
+	Roles    []string `json:"roles"`
 }
 
 // Tenant is one emulated Entra tenant.
@@ -53,6 +65,20 @@ type Tenant struct {
 	GroupClaimFormat string   `json:"groupClaimFormat"`
 	GroupLimit       int      `json:"groupLimit"`
 	ConsentRequired  bool     `json:"consentRequired"`
+	Groups           []Group  `json:"groups"`
+}
+
+// Group is optional metadata for a group name used by this tenant's users.
+// Membership itself lives on the user (User.Groups); a name used by a user but
+// not declared here still becomes a Graph group, with empty metadata.
+type Group struct {
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	MailNickname    string `json:"mailNickname"`
+	Mail            string `json:"mail"`
+	OID             string `json:"oid"`
+	SecurityEnabled *bool  `json:"securityEnabled"`
+	MailEnabled     *bool  `json:"mailEnabled"`
 }
 
 // Consent is a pre-granted admin consent of a client in a tenant.
@@ -73,6 +99,21 @@ type User struct {
 	AMR           []string `json:"amr"`
 	Admin         bool     `json:"admin"`
 	Error         string   `json:"error"`
+
+	// Account profile. These feed the Graph account surface and the matching
+	// optional token claims; every one of them is optional.
+	GivenName         string   `json:"givenName"`
+	Surname           string   `json:"surname"`
+	UPN               string   `json:"upn"`
+	AccountEnabled    *bool    `json:"accountEnabled"`
+	JobTitle          string   `json:"jobTitle"`
+	OfficeLocation    string   `json:"officeLocation"`
+	BusinessPhones    []string `json:"businessPhones"`
+	MobilePhone       string   `json:"mobilePhone"`
+	PreferredLanguage string   `json:"preferredLanguage"`
+	Roles             []string `json:"roles"`
+	WIDs              []string `json:"wids"`
+	Manager           string   `json:"manager"`
 }
 
 var (
@@ -109,6 +150,9 @@ func (c *Config) normalize() error {
 	if c.TokenExpiry <= 0 {
 		c.TokenExpiry = 3600
 	}
+	if err := c.normalizeGraph(); err != nil {
+		return err
+	}
 	if len(c.Tenants) == 0 {
 		return errors.New("at least one tenant is required")
 	}
@@ -135,6 +179,20 @@ func (c *Config) normalize() error {
 		}
 		if t.Name == "" {
 			t.Name = t.TID
+		}
+		if err := normalizeGroups(t); err != nil {
+			return err
+		}
+	}
+	for i := range c.Apps {
+		a := &c.Apps[i]
+		a.ClientID = strings.TrimSpace(a.ClientID)
+		a.TID = strings.ToLower(strings.TrimSpace(a.TID))
+		if a.ClientID == "" {
+			return fmt.Errorf("app %d: clientId is required", i)
+		}
+		if a.TID != "" && !tenants[a.TID] {
+			return fmt.Errorf("app %s: unknown tid %q", a.ClientID, a.TID)
 		}
 	}
 	for i := range c.Consents {
@@ -174,6 +232,57 @@ func (c *Config) normalize() error {
 		if u.Name == "" {
 			u.Name = u.Username
 		}
+		if err := normalizeProfile(u); err != nil {
+			return err
+		}
+	}
+	// Managers resolve against the whole user set, so they need a second pass.
+	for i := range c.Users {
+		u := &c.Users[i]
+		if u.Manager == "" {
+			continue
+		}
+		if u.Manager == u.Username {
+			return fmt.Errorf("user %s: manager cannot be the user itself", u.Username)
+		}
+		if !users[u.TID+"/"+u.Manager] {
+			return fmt.Errorf("user %s: unknown manager %q in tenant %s", u.Username, u.Manager, u.TID)
+		}
+	}
+	return nil
+}
+
+// normalizeGroups validates a tenant's declared group metadata.
+func normalizeGroups(t *Tenant) error {
+	seen := map[string]bool{}
+	for i := range t.Groups {
+		g := &t.Groups[i]
+		g.Name = strings.TrimSpace(g.Name)
+		if g.Name == "" {
+			return fmt.Errorf("tenant %s: group %d: name is required", t.TID, i)
+		}
+		if seen[g.Name] {
+			return fmt.Errorf("tenant %s: duplicate group %q", t.TID, g.Name)
+		}
+		seen[g.Name] = true
+		g.OID = strings.ToLower(strings.TrimSpace(g.OID))
+		if g.OID != "" && !guidRE.MatchString(g.OID) {
+			return fmt.Errorf("tenant %s: group %s: oid must be a GUID", t.TID, g.Name)
+		}
+	}
+	return nil
+}
+
+// normalizeProfile validates and lowercases the optional account fields.
+func normalizeProfile(u *User) error {
+	u.UPN = strings.ToLower(strings.TrimSpace(u.UPN))
+	u.Manager = strings.TrimSpace(u.Manager)
+	for i, w := range u.WIDs {
+		w = strings.ToLower(strings.TrimSpace(w))
+		if !guidRE.MatchString(w) {
+			return fmt.Errorf("user %s: wids[%d] must be a GUID", u.Username, i)
+		}
+		u.WIDs[i] = w
 	}
 	return nil
 }

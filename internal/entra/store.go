@@ -58,6 +58,19 @@ func (s *Store) mutate(fn func(*Config) error) error {
 	return nil
 }
 
+// SetGraphEnabled turns the Graph surface on or off at runtime. It goes
+// through the same copy-on-write publish as every other edit, so the change is
+// visible to the next request's snapshot and is undone by Reset.
+func (s *Store) SetGraphEnabled(v bool) error {
+	return s.mutate(func(c *Config) error {
+		if c.Graph == nil {
+			c.Graph = &GraphConfig{}
+		}
+		c.Graph.Enabled = boolPtr(v)
+		return nil
+	})
+}
+
 func normTID(tid string) string { return strings.ToLower(strings.TrimSpace(tid)) }
 
 // CreateTenant adds a tenant (duplicate tids are rejected by normalize).
@@ -172,6 +185,13 @@ func (s *Store) DeleteUser(tid, username string) error {
 			return fmt.Errorf("user %s in tenant %s: %w", username, tid, ErrNotFound)
 		}
 		c.Users = users
+		// Reports of the deleted user lose their manager rather than making
+		// the whole mutation fail validation.
+		for i := range c.Users {
+			if c.Users[i].TID == tid && c.Users[i].Manager == username {
+				c.Users[i].Manager = ""
+			}
+		}
 		return nil
 	})
 }
@@ -183,18 +203,36 @@ func cloneConfig(c *Config) *Config {
 		BasePath:          c.BasePath,
 		DefaultGroupLimit: c.DefaultGroupLimit,
 		TokenExpiry:       c.TokenExpiry,
+		IgnoreLoginHint:   c.IgnoreLoginHint,
+		Graph:             c.Graph.clone(),
 		Tenants:           make([]Tenant, len(c.Tenants)),
 		Consents:          append([]Consent(nil), c.Consents...),
+		Apps:              make([]App, len(c.Apps)),
 		Users:             make([]User, len(c.Users)),
 	}
 	for i, t := range c.Tenants {
 		out.Tenants[i] = t
 		out.Tenants[i].Domains = append([]string(nil), t.Domains...)
+		out.Tenants[i].Groups = make([]Group, len(t.Groups))
+		for j, g := range t.Groups {
+			out.Tenants[i].Groups[j] = g
+			out.Tenants[i].Groups[j].SecurityEnabled = copyBool(g.SecurityEnabled)
+			out.Tenants[i].Groups[j].MailEnabled = copyBool(g.MailEnabled)
+		}
+	}
+	for i, a := range c.Apps {
+		out.Apps[i] = a
+		out.Apps[i].Roles = append([]string(nil), a.Roles...)
 	}
 	for i, u := range c.Users {
 		out.Users[i] = u
 		out.Users[i].Groups = append([]string(nil), u.Groups...)
 		out.Users[i].AMR = append([]string(nil), u.AMR...)
+		out.Users[i].BusinessPhones = append([]string(nil), u.BusinessPhones...)
+		out.Users[i].Roles = append([]string(nil), u.Roles...)
+		out.Users[i].WIDs = append([]string(nil), u.WIDs...)
+		out.Users[i].EmailVerified = copyBool(u.EmailVerified)
+		out.Users[i].AccountEnabled = copyBool(u.AccountEnabled)
 	}
 	return out
 }

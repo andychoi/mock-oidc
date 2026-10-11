@@ -15,6 +15,11 @@ import (
 
 func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	if gt := strings.TrimSpace(req.FormParam("grant_type")); gt != oauth2.GrantAuthorizationCode {
+		// client_credentials is opt-in: it changes who can get a token at
+		// all, and most relying-party tests want it refused.
+		if gt == "client_credentials" && h.conf().AppOnlyOn() {
+			return h.clientCredentials(req, sc, h.conf())
+		}
 		return routing.ErrorResponse(&oauth2.Error{Code: "unsupported_grant_type",
 			Description: "AADSTS70003: The app requested an unsupported grant type '" + gt + "'.", Status: http.StatusBadRequest})
 	}
@@ -41,10 +46,12 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	cfg := h.conf()
 	t := cfg.Tenant(c.tid)
 	u := cfg.User(c.tid, c.username)
-	if u.Error == ErrInvalidGrant {
+	// accountEnabled: false is the ergonomic spelling of error: "invalid_grant".
+	if u.Error == ErrInvalidGrant || !u.Enabled() {
 		return invalidGrant("AADSTS50057: The user account is disabled.")
 	}
-	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, Tenant: t, User: u, ClientID: c.req.ClientID,
+	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
+		OverageSelfHosted: cfg.OverageSelfHosted(), Tenant: t, User: u, ClientID: c.req.ClientID,
 		Nonce: c.req.Nonce, Scopes: c.req.Scope, Now: h.now(), Expiry: cfg.TokenExpiry}
 	resp := jsonx.Obj{
 		{Name: "token_type", V: "Bearer"},

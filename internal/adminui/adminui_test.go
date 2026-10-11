@@ -60,6 +60,11 @@ func (f *fakeSettings) AdminSetSetting(name string, value bool) error {
 			return errSetting
 		}
 		f.st.EntraEnabled = value
+	case "graph":
+		if !f.st.EntraConfigured {
+			return errSetting
+		}
+		f.st.GraphEnabled = value
 	default:
 		return errSetting
 	}
@@ -391,5 +396,71 @@ func TestFrontRoutePrecedence(t *testing.T) {
 		if resp.StatusCode != 200 || !strings.Contains(body(t, resp), `"served" : "token"`) {
 			t.Errorf("POST %s: status %d body %q, want token route", path, resp.StatusCode, body(t, resp))
 		}
+	}
+}
+
+// The snapshot must carry the Graph state and the account profile fields, or
+// the UI cannot show or round-trip them.
+func TestAPIEntraSnapshotCarriesGraphAndProfile(t *testing.T) {
+	eh := testEntra(t)
+	rt := newRouter(eh, nil, nil)
+
+	// Create a user with the profile fields the Graph surface serves.
+	resp := do(t, rt, http.MethodPost, "http://h/admin/api/entra/users",
+		`{"username":"profiled","tid":"`+corpTID+`","name":"Profiled User","givenName":"Pro",
+		  "surname":"Filed","upn":"pro@corp.test","jobTitle":"Tester","officeLocation":"Lab",
+		  "businessPhones":["+1-555-0100"],"mobilePhone":"+1-555-0101","preferredLanguage":"en-US",
+		  "roles":["Portal.Admin"],"wids":["62e90394-69f5-4237-9190-012177145e10"],
+		  "manager":"jane","accountEnabled":false}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create: %d %s", resp.StatusCode, body(t, resp))
+	}
+
+	snap := body(t, do(t, rt, http.MethodGet, "http://h/admin/api/entra", ""))
+	for _, want := range []string{
+		`"graph"`, `"enabled" : true`, `"basePath" : "graph"`, `"userinfo" : true`,
+		`"givenName" : "Pro"`, `"surname" : "Filed"`, `"upn" : "pro@corp.test"`,
+		`"jobTitle" : "Tester"`, `"officeLocation" : "Lab"`, `"mobilePhone" : "+1-555-0101"`,
+		`"preferredLanguage" : "en-US"`, `"manager" : "jane"`, `"accountEnabled" : false`,
+		`"Portal.Admin"`, `"62e90394-69f5-4237-9190-012177145e10"`,
+	} {
+		if !strings.Contains(snap, want) {
+			t.Errorf("snapshot missing %s:\n%s", want, snap)
+		}
+	}
+}
+
+// The Graph toggle flips the entra config store, so the snapshot follows it.
+func TestAPIGraphToggle(t *testing.T) {
+	eh := testEntra(t)
+	settings := &fakeSettings{st: AdminSettings{EntraConfigured: true, EntraEnabled: true, GraphEnabled: true}}
+	rt := newRouter(eh, nil, settings)
+
+	if got := body(t, do(t, rt, http.MethodGet, "http://h/admin/api/settings", "")); !strings.Contains(got, `"graphEnabled" : true`) {
+		t.Fatalf("settings = %s", got)
+	}
+	resp := do(t, rt, http.MethodPost, "http://h/admin/api/settings", `{"name":"graph","value":false}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("toggle: %d %s", resp.StatusCode, body(t, resp))
+	}
+	if settings.st.GraphEnabled {
+		t.Error("the toggle did not reach the settings")
+	}
+	// And the real handler path: turning it off is visible in its own state.
+	if err := eh.AdminSetGraphEnabled(false); err != nil {
+		t.Fatal(err)
+	}
+	if eh.AdminGraphEnabled() {
+		t.Error("AdminGraphEnabled still reports on")
+	}
+	if got := body(t, do(t, rt, http.MethodGet, "http://h/admin/api/entra", "")); !strings.Contains(got, `"enabled" : false`) {
+		t.Errorf("snapshot does not reflect the toggle:\n%s", got)
+	}
+	// Reset restores the config seed, Graph included.
+	if resp := do(t, rt, http.MethodPost, "http://h/admin/api/entra/reset", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("reset: %d", resp.StatusCode)
+	}
+	if !eh.AdminGraphEnabled() {
+		t.Error("reset must restore the configured Graph state")
 	}
 }

@@ -90,6 +90,7 @@ type AdminSettings struct {
 	RotateRefreshToken bool
 	EntraConfigured    bool
 	EntraEnabled       bool
+	GraphEnabled       bool
 }
 
 // Settings exposes the server's runtime toggles; implemented by *server.Server.
@@ -194,6 +195,7 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 			{Name: "rotateRefreshToken", V: st.RotateRefreshToken},
 			{Name: "entraConfigured", V: st.EntraConfigured},
 			{Name: "entraEnabled", V: st.EntraEnabled},
+			{Name: "graphEnabled", V: st.GraphEnabled},
 		})
 	case post && action == "settings":
 		if a.settings == nil {
@@ -401,6 +403,7 @@ func (a *Handler) overview() jsonx.Obj {
 		st := a.settings.AdminSettings()
 		obj = append(obj,
 			jsonx.Field{Name: "entra", V: st.EntraEnabled},
+			jsonx.Field{Name: "graph", V: st.GraphEnabled},
 			jsonx.Field{Name: "interactiveLoginLive", V: st.InteractiveLogin},
 			jsonx.Field{Name: "rotateRefreshTokenLive", V: st.RotateRefreshToken},
 		)

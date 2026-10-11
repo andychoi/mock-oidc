@@ -327,6 +327,14 @@
       settings.entraEnabled, !settings.entraConfigured, async (v) => {
         await api('settings', POSTJSON({ name: 'entra', value: v }));
       });
+
+    toggle(list, 'Graph account API',
+      'Serve /' + (entra ? entra.basePath + '/' + (entra.graph ? entra.graph.basePath : 'graph') : 'entra/graph') +
+        '/ (me, users, groups, memberOf, getMemberObjects) and the OIDC userinfo endpoint. ' +
+        'Turning it off also sends the group-overage claim back to the real graph.microsoft.com.',
+      settings.graphEnabled, !settings.entraConfigured, async (v) => {
+        await api('settings', POSTJSON({ name: 'graph', value: v }));
+      });
   }
 
   function settingRow(parent, label, desc, value, disabled, apply) {
@@ -399,8 +407,12 @@
 
   function drawEntra(view) {
     add(view, el('h1', null, 'Entra mode'));
+    const g = entra.graph || {};
     add(view, el('p', 'facts', 'basePath /' + entra.basePath + ' · token expiry ' +
       entra.tokenExpiry + 's · default group limit ' + entra.defaultGroupLimit +
+      ' · Graph ' + (g.enabled ? 'on at /' + entra.basePath + '/' + g.basePath + '/v1.0' : 'off') +
+      (g.enabled && g.appOnly ? ' · app-only tokens on' : '') +
+      (entra.ignoreLoginHint ? ' · login_hint ignored' : '') +
       ' · edits are in-memory; "Reset to config" restores the config file.'));
 
     const cards = add(view, el('div', 'cards'));
@@ -489,7 +501,7 @@
     const wrap = add(view, el('div', 'table-wrap'));
     const table = add(wrap, el('table'));
     const hr = add(add(table, el('thead')), el('tr'));
-    for (const h of ['Username', 'Tenant', 'Name', 'Email', 'Groups', 'AMR', 'Admin', 'Error injection', '']) {
+    for (const h of ['Username', 'Tenant', 'Name', 'UPN', 'Groups', 'AMR', 'Admin', 'Error injection', '']) {
       add(hr, el('th', null, h));
     }
     const tbody = add(table, el('tbody'));
@@ -497,8 +509,10 @@
       const tr = add(tbody, el('tr'));
       add(tr, el('td', 'mono', u.username));
       add(tr, el('td', 'mono', u.tid));
-      add(tr, el('td', null, u.name));
-      add(tr, el('td', null, u.email || '—'));
+      const nameTd = add(tr, el('td', null, u.name));
+      if (u.accountEnabled === false) nameTd.appendChild(chip('chip-attention', 'disabled'));
+      const upnTd = add(tr, el('td', null, u.upn || u.email || '—'));
+      if (u.manager) upnTd.title = 'manager: ' + u.manager;
       const gTd = add(tr, el('td', 'num', String((u.groups || []).length)));
       gTd.title = (u.groups || []).join('\n');
       const amrTd = add(tr, el('td'));
@@ -546,7 +560,23 @@
       { name: 'groups', label: 'Groups', type: 'csv', value: u && u.groups, placeholder: 'team-a, team-b', wide: true },
       { name: 'amr', label: 'AMR', type: 'csv', value: u && u.amr, placeholder: 'pwd, mfa', wide: true },
       { name: 'admin', label: 'Admin (may grant admin consent)', type: 'checkbox', value: u && u.admin },
-      { name: 'error', label: 'Error injection', type: 'select', value: u ? u.error : '', options: errOpts }
+      { name: 'error', label: 'Error injection', type: 'select', value: u ? u.error : '', options: errOpts },
+      { name: 'accountEnabled', label: 'Account enabled', type: 'checkbox',
+        value: u ? u.accountEnabled !== false : true },
+      { name: 'givenName', label: 'Given name', type: 'text', value: u && u.givenName },
+      { name: 'surname', label: 'Surname', type: 'text', value: u && u.surname },
+      { name: 'upn', label: 'User principal name', type: 'text', value: u && u.upn,
+        placeholder: 'defaults to the email or username@domain', wide: true },
+      { name: 'jobTitle', label: 'Job title', type: 'text', value: u && u.jobTitle },
+      { name: 'officeLocation', label: 'Office location', type: 'text', value: u && u.officeLocation },
+      { name: 'mobilePhone', label: 'Mobile phone', type: 'text', value: u && u.mobilePhone },
+      { name: 'preferredLanguage', label: 'Preferred language', type: 'text',
+        value: u && u.preferredLanguage, placeholder: 'en-US' },
+      { name: 'businessPhones', label: 'Business phones', type: 'csv', value: u && u.businessPhones, wide: true },
+      { name: 'manager', label: 'Manager (username in the same tenant)', type: 'text',
+        value: u && u.manager, wide: true },
+      { name: 'roles', label: 'App roles (roles claim)', type: 'csv', value: u && u.roles, wide: true },
+      { name: 'wids', label: 'Directory role GUIDs (wids claim)', type: 'csv', value: u && u.wids, wide: true }
     ], isNew ? 'Create user' : 'Save', async (v) => {
       if (isNew) await api('entra/users', POSTJSON(v));
       else await api('entra/users/' + u.tid + '/' + encodeURIComponent(u.username), PUT(v));

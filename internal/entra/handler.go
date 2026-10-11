@@ -11,6 +11,9 @@ import (
 	"github.com/andychoi/mock-oidc/internal/routing"
 )
 
+// testAPISegment is the reserved first segment of the test-helper API.
+const testAPISegment = "_entra"
+
 // Handler serves every Entra mode endpoint under /{basePath}/.
 type Handler struct {
 	seed     *Config // the immutable startup config (basePath, consent seed)
@@ -62,8 +65,17 @@ func (h *Handler) Handle(req *oauth2.Request) routing.Response {
 	if len(segs) < 3 {
 		return routing.NotFound("not found")
 	}
-	if segs[1] == "_entra" {
+	if segs[1] == testAPISegment {
 		return h.testAPI(req, strings.Join(segs[2:], "/"))
+	}
+	cfg := h.conf()
+	// The Graph surface is tenant-agnostic: its segment is reserved ahead of
+	// tenant resolution, and the tenant comes from the caller's token. While
+	// Graph is disabled the segment is not reserved at all, so the path
+	// resolves as a tenant and answers AADSTS90002, exactly as a server
+	// without the feature does.
+	if cfg.GraphOn() && segs[1] == cfg.GraphBase() {
+		return h.graph(req, cfg, segs[2:])
 	}
 	sc, oerr := h.resolveScope(segs[1])
 	if oerr != nil {
@@ -114,13 +126,14 @@ func origin(req *oauth2.Request) string {
 }
 
 func (h *Handler) discovery(req *oauth2.Request, sc scope) routing.Response {
-	base := origin(req) + "/" + h.conf().BasePath
+	cfg := h.conf()
+	base := origin(req) + "/" + cfg.BasePath
 	issuerTID := "{tenantid}"
 	if !sc.Multi() {
 		issuerTID = sc.Tenant.TID
 	}
 	ep := base + "/" + sc.Segment
-	return routing.JSON(jsonx.Obj{
+	return h.discoveryDoc(req, cfg, jsonx.Obj{
 		{Name: "token_endpoint", V: ep + "/oauth2/v2.0/token"},
 		{Name: "token_endpoint_auth_methods_supported", V: []string{"client_secret_post", "private_key_jwt", "client_secret_basic"}},
 		{Name: "jwks_uri", V: ep + "/discovery/v2.0/keys"},
@@ -138,6 +151,17 @@ func (h *Handler) discovery(req *oauth2.Request, sc scope) routing.Response {
 		{Name: "tenant_region_scope", V: "NA"},
 		{Name: "cloud_instance_name", V: "microsoftonline.com"},
 	})
+}
+
+// discoveryDoc renders the discovery document, appending userinfo_endpoint
+// while that endpoint is served. Real Entra advertises one too, on
+// graph.microsoft.com; ours points at the emulated Graph, so a relying party
+// can actually call what it finds here.
+func (h *Handler) discoveryDoc(req *oauth2.Request, cfg *Config, doc jsonx.Obj) routing.Response {
+	if cfg.UserInfoOn() {
+		doc = append(doc, jsonx.Field{Name: "userinfo_endpoint", V: cfg.graphBaseURL(req) + "/" + userInfoPath})
+	}
+	return routing.JSON(doc)
 }
 
 func logout(req *oauth2.Request) routing.Response {

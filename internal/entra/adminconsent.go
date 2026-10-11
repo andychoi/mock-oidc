@@ -14,7 +14,8 @@ func (h *Handler) adminConsentGet(req *oauth2.Request, sc scope) routing.Respons
 		Action:     req.URL.RequestURI(),
 		Submit:     "accept",
 		ShowCancel: true,
-		Tenants:    h.pickerTenants(sc),
+		Hint:       readHints(req).LoginHint,
+		Tenants:    h.pickerTenants(h.conf(), sc, readHints(req)),
 	})
 }
 

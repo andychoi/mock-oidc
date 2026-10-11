@@ -14,11 +14,15 @@ button{display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;b
 button:hover{background:#f5f5f5}
 .email{color:#666;font-size:13px}
 .note{color:#888;font-size:12px;margin-top:24px}
+.hint{color:#555;font-size:13px;margin:0 0 12px}
+button.match{border-color:#0067b8;box-shadow:inset 3px 0 0 #0067b8}
+.tag{color:#0067b8;font-size:12px;float:right}
 </style>
 </head>
 <body>
 <main>
 <h1>{{.Heading}}</h1>
+{{if .Hint}}<p class="hint">The app asked to sign in <strong>{{.Hint}}</strong>.</p>{{end}}
 {{range $t := .Tenants}}
 <h2>{{$t.Name}}</h2>
 {{range $t.Users}}
@@ -26,7 +30,7 @@ button:hover{background:#f5f5f5}
 <input type="hidden" name="action" value="{{$.Submit}}">
 <input type="hidden" name="tid" value="{{$t.TID}}">
 <input type="hidden" name="username" value="{{.Username}}">
-<button type="submit">{{.Name}}{{if .Email}}<br><span class="email">{{.Email}}</span>{{end}}</button>
+<button type="submit"{{if .Match}} class="match" autofocus{{end}}>{{if .Match}}<span class="tag">login_hint</span>{{end}}{{.Name}}{{if .Email}}<br><span class="email">{{.Email}}</span>{{end}}</button>
 </form>
 {{end}}
 {{end}}

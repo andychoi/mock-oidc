@@ -117,6 +117,8 @@ the config files, and every page has a reset-to-seed action).
   and every token-callback issuer, and runtime **settings toggles** —
   interactive login, refresh-token rotation, and Entra mode on/off.
 - **Entra** (only when configured): full CRUD for **tenants and users**
+  (including the account profile fields the Graph API serves) and a Graph
+  on/off toggle
   (drawer forms, same validation as the config file), consents with per-row
   revoke, signing keys with rotation, and **Reset to config**.
 - **Directory**: the navikt login page quick-picks. Maintained here and
@@ -143,7 +145,8 @@ directory user — **password field accepts any value**.
 ## Entra mode (Microsoft Entra ID emulation)
 
 Opt-in emulation of Entra ID v2.0 for testing multi-tenant Entra relying parties
-(design: [docs/entra/00-design.md](docs/entra/00-design.md)). Enabled by
+(design: [docs/entra/00-design.md](docs/entra/00-design.md), account Graph API:
+[docs/entra/02-graph-design.md](docs/entra/02-graph-design.md)). Enabled by
 `ENTRA_CONFIG_PATH` (compose mounts `entra-demo.json`) or an `"entra"` block in
 the JSON config. With neither, the server behaves exactly as before.
 
@@ -157,16 +160,87 @@ the JSON config. With neither, the server behaves exactly as before.
 Demo tenants (`entra-demo.json`): Corp `11111111-…` (group names), Customer X
 `22222222-…` (group object IDs, consent required, overage above 5 groups),
 Partner P `33333333-…` (consent required). The account picker needs no password.
-Users cover MFA-required (`mfa`), disabled (`disabled`), overage (`many`), and
-tenant admins for admin consent (`jane`, `custadmin`, `partneradmin`).
+Users cover MFA-required (`mfa`), disabled (`disabled`), overage (`many`), a
+manager chain (`leo`/`mina` report to `jane`), and tenant admins for admin
+consent (`jane`, `custadmin`, `partneradmin`).
 
 Admin consent: `…/entra/{tid|organizations}/v2.0/adminconsent?client_id=…&redirect_uri=…&state=…`.
 
+### Account selection without a browser
+
+`login_hint` naming exactly one account in scope issues the code on the GET,
+skipping the picker — which is what lets a relying-party test run headless. It
+matches a UPN, an email or the configured username:
+
+```bash
+curl -si "https://oidc.dev.test/entra/11111111-1111-1111-1111-111111111111/oauth2/v2.0/authorize\
+?response_type=code&client_id=iam&redirect_uri=http://app.test/cb&scope=openid&login_hint=jane@corp.demo.local" \
+  | grep -i location          # 302 straight to ?code=…
+```
+
+`prompt=select_account` or `prompt=login` forces the picker anyway (the hinted
+account is marked), `"ignoreLoginHint": true` disables the shortcut, and
+`domain_hint=` narrows the `organizations`/`common` picker by tenant domain.
+`prompt=none` issues silently when the hint resolves and otherwise redirects
+`error=interaction_required` (AADSTS50058) — this mock keeps no session, so a
+resolvable hint *is* the session.
+
+### Graph account API
+
+On whenever Entra mode is; `"graph": {"enabled": false}` switches it off. The
+tenant is never in the path — it comes from the caller's token, as real Graph
+scopes a response by the token's tenant — and every response is confined to it.
+
+| Method | Path (under `/entra/graph`) | Returns |
+|---|---|---|
+| GET | `/v1.0/me` | the token's user |
+| GET | `/v1.0/me/memberOf`, `/transitiveMemberOf` | the user's groups |
+| GET | `/v1.0/me/manager`, `/directReports` | the manager chain |
+| POST | `/v1.0/me/getMemberObjects`, `/getMemberGroups` | group ids — **resolves group overage** |
+| GET | `/v1.0/users`, `/users/{id\|upn}` | the tenant's accounts |
+| GET | `/v1.0/users/{id}/memberOf`, `/manager`, `/directReports` | as for `/me` |
+| GET | `/v1.0/groups`, `/groups/{id}`, `/groups/{id}/members` | the tenant's groups |
+| GET/POST | `/oidc/userinfo` | OIDC claims (advertised as `userinfo_endpoint`) |
+
+```bash
+# sign in, then read the account with the access token
+AT=$(curl -s -X POST https://oidc.dev.test/entra/_entra/mint-token \
+  -d tid=11111111-1111-1111-1111-111111111111 -d username=jane | jq -r .access_token)
+curl -s https://oidc.dev.test/entra/graph/v1.0/me -H "Authorization: Bearer $AT" | jq
+curl -s https://oidc.dev.test/entra/graph/v1.0/me/memberOf -H "Authorization: Bearer $AT" | jq '.value[].displayName'
+curl -s -X POST https://oidc.dev.test/entra/graph/v1.0/me/getMemberObjects \
+  -H "Authorization: Bearer $AT" -d '{"securityEnabledOnly":true}' | jq
+```
+
+Group object IDs are the same values an `object_id` group claim carries, so a
+claim and a Graph group are one identifier. With Graph on, the overage claim's
+`_claim_sources` endpoint points **here** rather than at the real
+`graph.microsoft.com`, so a relying party can follow it inside the test
+environment (`"overageEndpoint": "microsoft"` restores Entra's URL).
+
+Query options: `$top` (default 100, max 999), `$skiptoken`, `$select`.
+`$filter`, `$orderby`, `$expand`, `$search` and `$count` are refused with
+`400 Request_UnsupportedQuery` rather than silently ignored.
+
+Reads need a Graph-audience access token this server minted; `/me` and
+`userinfo` additionally need a **delegated** token. With
+`"graph": {"appOnly": true}`, `grant_type=client_credentials` on a
+tenant-specific path mints an app-only token (roles from `apps[]`, no `oid`)
+that reads `/users` and `/groups` but gets `403` on `/me` — the shape of a
+directory-sync job. There is no fine-grained Graph permission enforcement: any
+valid Graph-audience token reads.
+
 Test helpers: `GET /entra/_entra/consents`, `POST /entra/_entra/reset`,
-`POST /entra/_entra/rotate-keys`, `GET /entra/_entra/groups?tid=…` (group name → object ID).
+`POST /entra/_entra/rotate-keys`, `GET /entra/_entra/groups?tid=…` (group name →
+object ID), `GET /entra/_entra/users?tid=…` (the directory as Graph sees it),
+`POST /entra/_entra/mint-token` (`tid`, `username`, optional `clientId`,
+`scope`) to get a usable token without driving the picker.
 
 Not emulated: real Conditional Access, Microsoft's UI and exact error wording,
-refresh-token redemption, implicit/hybrid flows, Microsoft Graph.
+refresh-token redemption, implicit/hybrid flows, Graph writes, `$filter` and the
+rest of OData, nested groups (`transitiveMemberOf` equals `memberOf`), app
+registrations, device code flow, and the Graph surface beyond accounts and
+groups.
 
 ## User directory
 

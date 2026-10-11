@@ -59,7 +59,12 @@ func (s *codeStore) take(code string) (authCode, bool) {
 	return c, ok
 }
 
-type pickerUser struct{ Username, Name, Email string }
+type pickerUser struct {
+	Username, Name, Email string
+	// Match marks the account a login_hint named, so a person sees which one
+	// the client asked for even when the shortcut did not fire.
+	Match bool
+}
 
 type pickerTenant struct {
 	TID, Name string
@@ -71,22 +76,124 @@ type pickerPage struct {
 	Action     string // form target: the current request URI (query preserved)
 	Submit     string // value of the hidden "action" field on account buttons
 	ShowCancel bool
+	Hint       string // the login_hint, echoed so the client's intent is visible
 	Tenants    []pickerTenant
 }
 
+// authHints are the account-selection parameters. They are read straight from
+// the query rather than added to oauth2.AuthRequest, so the shared parser the
+// navikt-compatible routes use is untouched.
+type authHints struct {
+	LoginHint  string
+	DomainHint string
+	Prompt     []string
+}
+
+func readHints(req *oauth2.Request) authHints {
+	q := req.URL.Query()
+	return authHints{
+		LoginHint:  strings.TrimSpace(q.Get("login_hint")),
+		DomainHint: strings.TrimSpace(q.Get("domain_hint")),
+		Prompt:     strings.Fields(q.Get("prompt")),
+	}
+}
+
+func (a authHints) has(p string) bool {
+	for _, v := range a.Prompt {
+		if v == p {
+			return true
+		}
+	}
+	return false
+}
+
+// forcesPicker reports whether the client insists on an interactive choice.
+func (a authHints) forcesPicker() bool { return a.has("select_account") || a.has("login") }
+
+// silent reports a prompt=none request: no UI may be shown.
+func (a authHints) silent() bool { return a.has("none") }
+
+// matchesHint reports whether a hint names this account. Entra hints carry a
+// UPN, but an email or the configured username is accepted too, so a fixture
+// is reachable by whichever name a test has at hand.
+func (u *User) matchesHint(t *Tenant, hint string) bool {
+	if hint == "" {
+		return false
+	}
+	hint = strings.ToLower(hint)
+	return strings.ToLower(u.PrincipalName(t)) == hint ||
+		(u.Email != "" && strings.ToLower(u.Email) == hint) ||
+		strings.ToLower(u.Username) == hint
+}
+
+// inScope reports whether a tenant is selectable for this request: the one
+// tenant of a tenant-specific path, or -- on organizations/common -- every
+// tenant, narrowed by domain_hint when it names one.
+func (h *Handler) inScope(cfg *Config, sc scope, t *Tenant, hints authHints) bool {
+	if !sc.Multi() {
+		return t.TID == sc.Tenant.TID
+	}
+	if hints.DomainHint == "" || !cfg.domainHintMatchesAny(hints.DomainHint) {
+		return true
+	}
+	return t.hasDomain(hints.DomainHint)
+}
+
+func (t *Tenant) hasDomain(domain string) bool {
+	for _, d := range t.Domains {
+		if strings.EqualFold(d, domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// domainHintMatchesAny reports whether any tenant carries the domain. A hint
+// that matches nothing is ignored rather than emptying the picker, which is
+// how Entra treats an unusable domain_hint.
+func (c *Config) domainHintMatchesAny(domain string) bool {
+	for i := range c.Tenants {
+		if c.Tenants[i].hasDomain(domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// hintMatches returns the accounts in scope that login_hint names.
+func (h *Handler) hintMatches(cfg *Config, sc scope, hints authHints) []*User {
+	if hints.LoginHint == "" {
+		return nil
+	}
+	var out []*User
+	for i := range cfg.Tenants {
+		t := &cfg.Tenants[i]
+		if !h.inScope(cfg, sc, t, hints) {
+			continue
+		}
+		for _, u := range cfg.UsersIn(t.TID) {
+			if u.matchesHint(t, hints.LoginHint) {
+				out = append(out, u)
+			}
+		}
+	}
+	return out
+}
+
 // pickerTenants lists the accounts selectable in a scope: one tenant, or all
-// tenants for organizations/common.
-func (h *Handler) pickerTenants(sc scope) []pickerTenant {
-	cfg := h.conf()
+// tenants for organizations/common, narrowed by domain_hint and marking the
+// account login_hint named.
+func (h *Handler) pickerTenants(cfg *Config, sc scope, hints authHints) []pickerTenant {
 	var out []pickerTenant
 	for i := range cfg.Tenants {
 		t := &cfg.Tenants[i]
-		if !sc.Multi() && t.TID != sc.Tenant.TID {
+		if !h.inScope(cfg, sc, t, hints) {
 			continue
 		}
 		pt := pickerTenant{TID: t.TID, Name: t.Name}
 		for _, u := range cfg.UsersIn(t.TID) {
-			pt.Users = append(pt.Users, pickerUser{Username: u.Username, Name: u.Name, Email: u.Email})
+			pt.Users = append(pt.Users, pickerUser{Username: u.Username, Name: u.Name,
+				Email: u.Email, Match: u.matchesHint(t, hints.LoginHint)})
 		}
 		out = append(out, pt)
 	}
@@ -112,7 +219,28 @@ func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
 	if rm := ar.ResponseMode; rm != "" && rm != "query" {
 		return unsupportedResponseMode(rm)
 	}
-	return renderPicker(pickerPage{Heading: "Pick an account", Action: req.URL.RequestURI(), Submit: "signin", Tenants: h.pickerTenants(sc)})
+	cfg := h.conf()
+	hints := readHints(req)
+	// A login_hint naming exactly one account stands in for a session: it is
+	// what lets a relying party test run without a browser. ignoreLoginHint
+	// turns the shortcut off, and prompt=select_account/login overrides it.
+	matches := h.hintMatches(cfg, sc, hints)
+	resolved := len(matches) == 1 && !cfg.IgnoreLoginHint
+	if hints.silent() {
+		if resolved {
+			return h.issueCode(req, ar, sc, cfg, matches[0])
+		}
+		// Divergence, documented in docs/entra/02-graph-design.md section 7:
+		// this mock keeps no session, so a resolvable login_hint is the only
+		// thing a silent request can succeed on.
+		return errorRedirect(ar.RedirectURI, ar.State, "interaction_required",
+			"AADSTS50058: A silent sign-in request was sent but no user is signed in.")
+	}
+	if resolved && !hints.forcesPicker() {
+		return h.issueCode(req, ar, sc, cfg, matches[0])
+	}
+	return renderPicker(pickerPage{Heading: "Pick an account", Action: req.URL.RequestURI(),
+		Submit: "signin", Hint: hints.LoginHint, Tenants: h.pickerTenants(cfg, sc, hints)})
 }
 
 func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response {
@@ -126,10 +254,18 @@ func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response 
 	if rm := ar.ResponseMode; rm != "" && rm != "query" {
 		return unsupportedResponseMode(rm)
 	}
-	t, u, oerr := h.postedUser(req, sc)
+	_, u, oerr := h.postedUser(req, sc)
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
 	}
+	return h.issueCode(req, ar, sc, h.conf(), u)
+}
+
+// issueCode applies the per-account checks and mints an authorization code.
+// It is shared by the picker submit and the login_hint shortcut, so a hinted
+// sign-in is held to exactly the same rules as a clicked one.
+func (h *Handler) issueCode(req *oauth2.Request, ar *oauth2.AuthRequest, sc scope, cfg *Config, u *User) routing.Response {
+	t := cfg.Tenant(u.TID)
 	switch u.Error {
 	case ErrInteractionRequired:
 		return errorRedirect(ar.RedirectURI, ar.State, "interaction_required",
