@@ -19,14 +19,29 @@
         { "name": "AMS Service Managers", "description": "Customer-side service managers" }
       ] },
     { "tid": "33333333-3333-3333-3333-333333333333", "name": "Partner P (demo)",
-      "domains": ["partner-p.demo.local"], "groupClaimFormat": "name", "consentRequired": true }
+      "domains": ["partner-p.demo.local"], "groupClaimFormat": "name", "consentRequired": true },
+    { "tid": "44444444-4444-4444-4444-444444444444", "name": "Org Chart (demo)",
+      "domains": ["org.demo.local"], "groupClaimFormat": "name",
+      "groups": [
+        { "name": "GRP_DEPT_DEPT001_HRTeam", "description": "HR team (dynamic, by org code)",
+          "membershipRule": "(user.extensionAttribute1 -eq \"DEPT001\")" },
+        { "name": "GRP_DEPT_DEPT002_Finance", "description": "Finance team (dynamic, by org code)",
+          "membershipRule": "(user.extensionAttribute1 -eq \"DEPT002\")" },
+        { "name": "GRP_REPORTS_CEO", "description": "The CEO's direct reports (dynamic)",
+          "membershipRule": "Direct Reports for \"44444444-0000-0000-0000-000000000001\"" }
+      ] }
   ],
   "consents": [
     { "clientId": "iam", "tid": "11111111-1111-1111-1111-111111111111" }
   ],
   "apps": [
     { "clientId": "iam-sync", "tid": "11111111-1111-1111-1111-111111111111",
-      "roles": ["User.Read.All", "Group.Read.All"] }
+      "roles": ["User.Read.All", "Group.Read.All"] },
+    { "clientId": "iam", "tid": "44444444-4444-4444-4444-444444444444",
+      "claims": [
+        { "name": "org_code", "source": "user.extensionAttribute1" },
+        { "name": "department", "source": "user.department" }
+      ] }
   ],
   "users": [
     { "username": "jane", "tid": "11111111-1111-1111-1111-111111111111", "name": "Jane Kim",
@@ -58,6 +73,22 @@
     { "username": "partneradmin", "tid": "33333333-3333-3333-3333-333333333333", "name": "Partner Admin",
       "admin": true },
     { "username": "disabled", "tid": "33333333-3333-3333-3333-333333333333", "name": "Disabled User",
-      "accountEnabled": false }
+      "accountEnabled": false },
+    { "username": "ceo", "tid": "44444444-4444-4444-4444-444444444444", "name": "Chris Ahn",
+      "oid": "44444444-0000-0000-0000-000000000001", "email": "ceo@org.demo.local",
+      "jobTitle": "CEO", "department": "Executive", "companyName": "Org Demo", "employeeId": "E0001",
+      "onPremisesExtensionAttributes": { "extensionAttribute1": "DEPT000" } },
+    { "username": "hrlead", "tid": "44444444-4444-4444-4444-444444444444", "name": "Hana Yoon",
+      "email": "hana@org.demo.local", "jobTitle": "HR Lead", "department": "HR",
+      "companyName": "Org Demo", "employeeId": "E0101", "manager": "ceo",
+      "onPremisesExtensionAttributes": { "extensionAttribute1": "DEPT001", "extensionAttribute2": "L5" } },
+    { "username": "hrstaff", "tid": "44444444-4444-4444-4444-444444444444", "name": "Jun Seo",
+      "email": "jun@org.demo.local", "jobTitle": "HR Partner", "department": "HR",
+      "companyName": "Org Demo", "employeeId": "E0102", "manager": "hrlead",
+      "onPremisesExtensionAttributes": { "extensionAttribute1": "DEPT001", "extensionAttribute2": "L3" } },
+    { "username": "finlead", "tid": "44444444-4444-4444-4444-444444444444", "name": "Min Lee",
+      "email": "min@org.demo.local", "jobTitle": "Finance Lead", "department": "Finance",
+      "companyName": "Org Demo", "employeeId": "E0201", "manager": "ceo",
+      "onPremisesExtensionAttributes": { "extensionAttribute1": "DEPT002", "extensionAttribute2": "L5" } }
   ]
 }

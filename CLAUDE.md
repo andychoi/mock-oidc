@@ -6,13 +6,16 @@ Module `github.com/andychoi/mock-oidc`, Go 1.27, stdlib only (plus `go-pkcs12`).
 ## Entra mode
 
 Opt-in Microsoft Entra ID emulation, needed by the IAM project (`../iam`, ADR-0007) because no real
-Entra test tenant exists. Both phases are implemented; read the design before changing either.
+Entra test tenant exists. All three phases are implemented; read the design before changing any.
 
 1. Sign-in and tokens: [`docs/entra/00-design.md`](docs/entra/00-design.md),
    plan [`docs/entra/01-plan.md`](docs/entra/01-plan.md)
 2. Account Graph API, `userinfo`, selection hints, app-only tokens:
    [`docs/entra/02-graph-design.md`](docs/entra/02-graph-design.md),
    plan [`docs/entra/03-graph-plan.md`](docs/entra/03-graph-plan.md)
+3. Org directory — `department`/`extensionAttribute1-3`, dynamic groups (`rule.go`), `$filter`
+   (`filter.go`), `$expand=manager`, `apps[].claims` mapping:
+   [`docs/entra/04-org-directory-design.md`](docs/entra/04-org-directory-design.md)
 
 The Graph surface (`internal/entra/graph.go`, `odata.go`, `verify.go`, `directory.go`) is on
 whenever Entra mode is, mounted on a reserved segment of the same front route and scoped by the

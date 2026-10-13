@@ -21,9 +21,20 @@ const (
 )
 
 // Query options real Graph supports and this emulator does not. Refusing them
-// is safer than ignoring them: a caller that filters server-side would
-// otherwise silently receive the unfiltered set.
-var unsupportedOptions = []string{"$filter", "$orderby", "$expand", "$search", "$count", "$apply", "$format"}
+// is safer than ignoring them: a caller that sorts or counts server-side would
+// otherwise silently receive the wrong answer. $filter and $expand are
+// supported in part (filter.go, expandManager) and refused where they are not.
+var unsupportedOptions = []string{"$orderby", "$search", "$count", "$apply", "$format"}
+
+// selectOnly lists, per entity type, the properties Graph v1.0 returns only
+// when $select names them. They are still filterable.
+var selectOnly = map[string]map[string]bool{
+	typeUser: {"department": true, "companyName": true, "employeeId": true, "onPremisesExtensionAttributes": true},
+}
+
+// navigationProps are expanded navigation properties: once present on an
+// entity (via $expand) they survive $select, as in Graph.
+var navigationProps = map[string]bool{"manager": true}
 
 // graphJSON renders a Graph document. It deliberately bypasses
 // routing.ErrorResponse, which lowercases whole bodies for navikt
@@ -106,15 +117,29 @@ func parseSkip(raw string) int {
 }
 
 // rejectUnsupportedOptions fails a request that uses a query option this
-// emulator does not implement.
-func rejectUnsupportedOptions(req *oauth2.Request) *graphError {
+// emulator does not implement, or one (such as $filter on a single entity)
+// that the caller says does not apply here.
+func rejectUnsupportedOptions(req *oauth2.Request, alsoRefused ...string) *graphError {
 	q := req.URL.Query()
-	for _, opt := range unsupportedOptions {
+	for _, opt := range append(unsupportedOptions, alsoRefused...) {
 		if _, ok := q[opt]; ok {
 			return unsupportedQuery("The query option '" + opt + "' is not supported by this emulator.")
 		}
 	}
 	return nil
+}
+
+// refusedHere lists the partly supported options a response cannot honor:
+// $filter is for collections only, $expand only where a route expands.
+func refusedHere(collection, expandable bool) []string {
+	var out []string
+	if !collection {
+		out = append(out, "$filter")
+	}
+	if !expandable {
+		out = append(out, "$expand")
+	}
+	return out
 }
 
 // nextLink builds @odata.nextLink: the same request with $skiptoken advanced.
@@ -144,16 +169,33 @@ func (c *Config) nextLink(req *oauth2.Request, nextSkip int) string {
 // survives, as it does in Graph, and so does the entity's own context. An
 // unknown property is an error rather than a silent omission, because a
 // caller that misspells a field should hear about it.
+//
+// Without $select, the type's $select-only properties are dropped, leaving
+// Graph's default property set. Expanded navigation properties and
+// @odata.type always survive.
 func applySelect(entity jsonx.Obj, raw, odataType string) (jsonx.Obj, *graphError) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return entity, nil
+		hidden := selectOnly[odataType]
+		if len(hidden) == 0 {
+			return entity, nil
+		}
+		out := make(jsonx.Obj, 0, len(entity))
+		for _, f := range entity {
+			if !hidden[f.Name] {
+				out = append(out, f)
+			}
+		}
+		return out, nil
 	}
 	known := make(map[string]string, len(entity))
 	for _, f := range entity {
 		known[strings.ToLower(f.Name)] = f.Name
 	}
-	keep := map[string]bool{"id": true, "@odata.context": true}
+	keep := map[string]bool{"id": true, "@odata.context": true, "@odata.type": true}
+	for name := range navigationProps {
+		keep[name] = true
+	}
 	for _, want := range strings.Split(raw, ",") {
 		want = strings.TrimSpace(want)
 		if want == "" {
@@ -176,7 +218,13 @@ func applySelect(entity jsonx.Obj, raw, odataType string) (jsonx.Obj, *graphErro
 
 // graphEntity answers with a single entity, carrying the $entity context.
 func (h *Handler) graphEntity(req *oauth2.Request, cfg *Config, ctxSuffix string, entity jsonx.Obj, odataType string) routing.Response {
-	if gerr := rejectUnsupportedOptions(req); gerr != nil {
+	return h.renderEntity(req, cfg, ctxSuffix, entity, odataType, false)
+}
+
+// renderEntity is graphEntity for a route that may have expanded entity
+// (expandable): the route has already validated and applied $expand.
+func (h *Handler) renderEntity(req *oauth2.Request, cfg *Config, ctxSuffix string, entity jsonx.Obj, odataType string, expandable bool) routing.Response {
+	if gerr := rejectUnsupportedOptions(req, refusedHere(false, expandable)...); gerr != nil {
 		return h.graphErrorResponse(req, gerr)
 	}
 	body := append(jsonx.Obj{{Name: "@odata.context", V: cfg.graphContext(req, ctxSuffix)}}, entity...)
@@ -187,12 +235,32 @@ func (h *Handler) graphEntity(req *oauth2.Request, cfg *Config, ctxSuffix string
 	return graphJSON(http.StatusOK, body)
 }
 
-// graphCollection answers with an OData collection: the ordered items paged by
-// $top/$skiptoken, each narrowed by $select, with @odata.nextLink present only
-// while rows remain. Collection items carry no context of their own.
+// graphCollection answers with an OData collection: the items narrowed by
+// $filter, paged by $top/$skiptoken, each projected by $select, with
+// @odata.nextLink present only while rows remain. Collection items carry no
+// context of their own.
 func (h *Handler) graphCollection(req *oauth2.Request, cfg *Config, ctxSuffix string, items []jsonx.Obj, odataType string) routing.Response {
-	if gerr := rejectUnsupportedOptions(req); gerr != nil {
+	return h.renderCollection(req, cfg, ctxSuffix, items, odataType, false)
+}
+
+// renderCollection is graphCollection for a route that may have expanded its
+// items (expandable).
+func (h *Handler) renderCollection(req *oauth2.Request, cfg *Config, ctxSuffix string, items []jsonx.Obj, odataType string, expandable bool) routing.Response {
+	if gerr := rejectUnsupportedOptions(req, refusedHere(true, expandable)...); gerr != nil {
 		return h.graphErrorResponse(req, gerr)
+	}
+	if _, filtered := req.URL.Query()["$filter"]; filtered {
+		f, gerr := parseFilter(req.QueryParam("$filter"), odataType)
+		if gerr != nil {
+			return h.graphErrorResponse(req, gerr)
+		}
+		kept := make([]jsonx.Obj, 0, len(items))
+		for _, item := range items {
+			if f.eval(item) {
+				kept = append(kept, item)
+			}
+		}
+		items = kept
 	}
 	top := cfg.parseTop(req.QueryParam("$top"))
 	skip := parseSkip(req.QueryParam("$skiptoken"))

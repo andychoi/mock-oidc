@@ -127,8 +127,8 @@
 
   /* ===== drawer ===== */
 
-  // fields: {name, label, type: text|number|select|checkbox|csv, value,
-  //          options:[{value,label}], placeholder, help, disabled, wide}
+  // fields: {name, label, type: text|number|select|checkbox|csv|textarea, value,
+  //          options:[{value,label}], placeholder, help, disabled, wide, rows}
   function openDrawer(title, fields, saveLabel, onSave) {
     const root = $('#drawer-root');
     const backdrop = el('div', 'drawer-backdrop');
@@ -166,6 +166,12 @@
             input.appendChild(o);
           }
           input.value = f.value;
+        } else if (f.type === 'textarea') {
+          input = el('textarea');
+          input.rows = f.rows || 8;
+          input.spellcheck = false;
+          if (f.value != null) input.value = f.value;
+          if (f.placeholder) input.placeholder = f.placeholder;
         } else {
           input = el('input');
           if (f.type === 'number') input.type = 'number';
@@ -487,13 +493,43 @@
       { name: 'groupClaimFormat', label: 'Group claim format', type: 'select', value: t ? t.groupClaimFormat : 'name',
         options: [{ value: 'name', label: 'name' }, { value: 'object_id', label: 'object_id' }] },
       { name: 'groupLimit', label: 'Group limit', type: 'number', value: t ? t.groupLimit : entra.defaultGroupLimit },
-      { name: 'consentRequired', label: 'Admin consent required', type: 'checkbox', value: t && t.consentRequired, wide: true }
+      { name: 'consentRequired', label: 'Admin consent required', type: 'checkbox', value: t && t.consentRequired, wide: true },
+      { name: 'groups', label: 'Groups (JSON)', type: 'textarea', value: groupsJSON(t ? t.groups : []), wide: true, rows: 10,
+        placeholder: '[{"name": "GRP_DEPT_DEPT001_HRTeam", "membershipRule": "user.extensionAttribute1 -eq \\"DEPT001\\""}]',
+        help: 'Declared group metadata. A membershipRule makes the group dynamic: its members are computed ' +
+          'from user attributes and cannot be assigned on users.' }
     ], isNew ? 'Create tenant' : 'Save', async (v) => {
+      v.groups = parseGroupsJSON(v.groups);
       if (isNew) await api('entra/tenants', POSTJSON(v));
       else await api('entra/tenants/' + t.tid, PUT(v));
       toast(isNew ? 'Tenant created' : 'Tenant saved');
       await reload();
     });
+  }
+
+  // groupsJSON renders declared groups for editing: configured values only,
+  // so a save never pins the derived object ID or default flags.
+  function groupsJSON(groups) {
+    const out = (groups || []).map((g) => {
+      const o = { name: g.name };
+      if (g.description) o.description = g.description;
+      if (g.configuredOid) o.oid = g.configuredOid;
+      if (g.mailNickname) o.mailNickname = g.mailNickname;
+      if (g.mail) o.mail = g.mail;
+      if (g.securityEnabled != null) o.securityEnabled = g.securityEnabled;
+      if (g.mailEnabled != null) o.mailEnabled = g.mailEnabled;
+      if (g.membershipRule) o.membershipRule = g.membershipRule;
+      return o;
+    });
+    return JSON.stringify(out, null, 2);
+  }
+
+  function parseGroupsJSON(text) {
+    if (!text.trim()) return [];
+    let groups;
+    try { groups = JSON.parse(text); } catch (err) { throw new Error('Groups: invalid JSON: ' + err.message); }
+    if (!Array.isArray(groups)) throw new Error('Groups: expected a JSON array');
+    return groups;
   }
 
   function drawUsers(view) {
@@ -513,8 +549,9 @@
       if (u.accountEnabled === false) nameTd.appendChild(chip('chip-attention', 'disabled'));
       const upnTd = add(tr, el('td', null, u.upn || u.email || '—'));
       if (u.manager) upnTd.title = 'manager: ' + u.manager;
-      const gTd = add(tr, el('td', 'num', String((u.groups || []).length)));
-      gTd.title = (u.groups || []).join('\n');
+      const dyn = u.dynamicGroups || [];
+      const gTd = add(tr, el('td', 'num', String((u.groups || []).length + dyn.length)));
+      gTd.title = (u.groups || []).concat(dyn.map((g) => g + ' (dynamic)')).join('\n');
       const amrTd = add(tr, el('td'));
       for (const a of u.amr || []) amrTd.appendChild(chip('chip-done', a));
       if (!(u.amr || []).length) add(amrTd, el('span', 'dim', '—'));
@@ -542,6 +579,10 @@
     if (!entra.users.length) add(view, el('div', 'empty', 'No users configured.'));
   }
 
+  function ext(u, n) {
+    return (u.onPremisesExtensionAttributes || {})['extensionAttribute' + n];
+  }
+
   function userDrawer(u) {
     const isNew = !u;
     const tenantOpts = entra.tenants.map((t) => ({ value: t.tid, label: t.name + ' (' + t.tid + ')' }));
@@ -557,7 +598,12 @@
         options: tenantOpts, disabled: !isNew, wide: true },
       { name: 'name', label: 'Name', type: 'text', value: u && u.name, placeholder: 'defaults to the username' },
       { name: 'email', label: 'Email', type: 'text', value: u && u.email },
-      { name: 'groups', label: 'Groups', type: 'csv', value: u && u.groups, placeholder: 'team-a, team-b', wide: true },
+      { name: 'emailVerified', label: 'Email verified (xms_edov)', type: 'select',
+        value: u && u.emailVerified != null ? String(u.emailVerified) : '',
+        options: [{ value: '', label: 'unset' }, { value: 'true', label: 'true' }, { value: 'false', label: 'false' }] },
+      { name: 'groups', label: 'Groups', type: 'csv', value: u && u.groups, placeholder: 'team-a, team-b', wide: true,
+        help: u && (u.dynamicGroups || []).length
+          ? 'Also in dynamic groups (from rules): ' + u.dynamicGroups.join(', ') : undefined },
       { name: 'amr', label: 'AMR', type: 'csv', value: u && u.amr, placeholder: 'pwd, mfa', wide: true },
       { name: 'admin', label: 'Admin (may grant admin consent)', type: 'checkbox', value: u && u.admin },
       { name: 'error', label: 'Error injection', type: 'select', value: u ? u.error : '', options: errOpts },
@@ -573,11 +619,24 @@
       { name: 'preferredLanguage', label: 'Preferred language', type: 'text',
         value: u && u.preferredLanguage, placeholder: 'en-US' },
       { name: 'businessPhones', label: 'Business phones', type: 'csv', value: u && u.businessPhones, wide: true },
-      { name: 'manager', label: 'Manager (username in the same tenant)', type: 'text',
+      { name: 'manager', label: 'Manager (username, object ID or UPN in the same tenant)', type: 'text',
         value: u && u.manager, wide: true },
+      { name: 'department', label: 'Department', type: 'text', value: u && u.department },
+      { name: 'companyName', label: 'Company', type: 'text', value: u && u.companyName },
+      { name: 'employeeId', label: 'Employee ID', type: 'text', value: u && u.employeeId },
+      { name: 'extensionAttribute1', label: 'extensionAttribute1 (org code)', type: 'text', value: u && ext(u, 1),
+        placeholder: 'e.g. DEPT001' },
+      { name: 'extensionAttribute2', label: 'extensionAttribute2', type: 'text', value: u && ext(u, 2) },
+      { name: 'extensionAttribute3', label: 'extensionAttribute3', type: 'text', value: u && ext(u, 3) },
       { name: 'roles', label: 'App roles (roles claim)', type: 'csv', value: u && u.roles, wide: true },
       { name: 'wids', label: 'Directory role GUIDs (wids claim)', type: 'csv', value: u && u.wids, wide: true }
     ], isNew ? 'Create user' : 'Save', async (v) => {
+      v.emailVerified = v.emailVerified === '' ? null : v.emailVerified === 'true';
+      v.onPremisesExtensionAttributes = {};
+      for (const n of [1, 2, 3]) {
+        v.onPremisesExtensionAttributes['extensionAttribute' + n] = v['extensionAttribute' + n];
+        delete v['extensionAttribute' + n];
+      }
       if (isNew) await api('entra/users', POSTJSON(v));
       else await api('entra/users/' + u.tid + '/' + encodeURIComponent(u.username), PUT(v));
       toast(isNew ? 'User created' : 'User saved');

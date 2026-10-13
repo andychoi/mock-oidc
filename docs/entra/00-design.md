@@ -32,8 +32,9 @@ lookup by domain name in the path; SAML/WS-Fed.
 **No longer non-goals.** The account-related part of Microsoft Graph, `userinfo` and
 `getMemberObjects` are now emulated — see [`02-graph-design.md`](02-graph-design.md), which also
 supersedes this document's "no `userinfo_endpoint`" decision (§3.1) and its `graph.microsoft.com`
-overage endpoint (§4.2). Graph writes, `$filter`, nested groups and the non-account Graph surface
-remain out of scope.
+overage endpoint (§4.2). Org attributes, dynamic groups, a `$filter` subset and `$expand=manager`
+followed in [`04-org-directory-design.md`](04-org-directory-design.md). Graph writes, nested groups
+and the non-account Graph surface remain out of scope.
 
 ## 2. Architecture
 

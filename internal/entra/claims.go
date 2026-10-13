@@ -30,6 +30,10 @@ type TokenInput struct {
 	Scopes   []string
 	Now      time.Time
 	Expiry   int64
+
+	// MappedClaims are the app's claims-mapping additions for this user
+	// (Config.MappedClaims); they go into the ID token only.
+	MappedClaims map[string]string
 }
 
 // Issuer is the v2.0 issuer of a tenant: {origin}/{basePath}/{tid}/v2.0.
@@ -44,8 +48,21 @@ func PairwiseSub(clientID, oid string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// IDTokenClaims builds the v2.0 ID token claims (design §4.1–4.2).
+// IDTokenClaims builds the v2.0 ID token claims (design §4.1–4.2), including
+// the app's mapped claims.
 func IDTokenClaims(in TokenInput) map[string]any {
+	c := baseClaims(in)
+	if in.Nonce != "" {
+		c["nonce"] = in.Nonce
+	}
+	for name, v := range in.MappedClaims {
+		c[name] = v
+	}
+	return c
+}
+
+// baseClaims are the claims the ID token and the access token share.
+func baseClaims(in TokenInput) map[string]any {
 	now := in.Now.Unix()
 	c := map[string]any{
 		"iss":                Issuer(in.Origin, in.BasePath, in.Tenant.TID),
@@ -60,9 +77,6 @@ func IDTokenClaims(in TokenInput) map[string]any {
 		"name":               in.User.Name,
 		"preferred_username": preferredUsername(in.Tenant, in.User),
 		"uti":                token.RandomAuthorizationCode()[:22],
-	}
-	if in.Nonce != "" {
-		c["nonce"] = in.Nonce
 	}
 	if in.User.Email != "" && hasScope(in.Scopes, "email") {
 		c["email"] = in.User.Email
@@ -92,8 +106,7 @@ func IDTokenClaims(in TokenInput) map[string]any {
 // AccessTokenClaims builds a Graph-audience access token (RPs must not
 // validate it; design §4.3).
 func AccessTokenClaims(in TokenInput) map[string]any {
-	c := IDTokenClaims(in)
-	delete(c, "nonce")
+	c := baseClaims(in)
 	c["aud"] = graphAppID
 	c["scp"] = ScopeValue(in.Scopes)
 	// Entra names the client on the access token twice: azp for the
@@ -150,19 +163,19 @@ func preferredUsername(t *Tenant, u *User) string {
 // addGroups emits groups (names or object IDs), or the overage markers when
 // the user has more groups than the tenant limit.
 func addGroups(c map[string]any, in TokenInput) {
-	t, u := in.Tenant, in.User
-	if len(u.Groups) == 0 {
+	t, groups := in.Tenant, in.User.MemberGroups()
+	if len(groups) == 0 {
 		return
 	}
-	if len(u.Groups) > t.GroupLimit {
+	if len(groups) > t.GroupLimit {
 		c["_claim_names"] = map[string]any{"groups": "src1"}
 		c["_claim_sources"] = map[string]any{"src1": map[string]any{
 			"endpoint": overageEndpoint(in),
 		}}
 		return
 	}
-	vals := make([]string, 0, len(u.Groups))
-	for _, g := range u.Groups {
+	vals := make([]string, 0, len(groups))
+	for _, g := range groups {
 		if t.GroupClaimFormat == FormatObjectID {
 			vals = append(vals, GroupObjectID(t.TID, g))
 		} else {
@@ -181,6 +194,29 @@ func overageEndpoint(in TokenInput) string {
 		return "https://graph.microsoft.com/v1.0/users/" + in.User.OID + "/getMemberObjects"
 	}
 	return in.Origin + "/" + in.BasePath + "/" + in.GraphBase + "/v1.0/users/" + in.User.OID + "/getMemberObjects"
+}
+
+// MappedClaims returns the claims-mapping additions for clientID's tokens
+// about u: every mapped attribute that has a value. An app pinned to a tenant
+// maps only that tenant's users.
+func (c *Config) MappedClaims(clientID string, u *User) map[string]string {
+	t := c.Tenant(u.TID)
+	var out map[string]string
+	for i := range c.Apps {
+		a := &c.Apps[i]
+		if a.ClientID != clientID || (a.TID != "" && a.TID != u.TID) {
+			continue
+		}
+		for _, m := range a.Claims {
+			if v := claimSources[strings.ToLower(m.Source)](t, u); v != "" {
+				if out == nil {
+					out = map[string]string{}
+				}
+				out[m.Name] = v
+			}
+		}
+	}
+	return out
 }
 
 func hasScope(scopes []string, s string) bool {

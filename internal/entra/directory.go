@@ -20,6 +20,7 @@ type DirGroup struct {
 	Mail            string
 	SecurityEnabled bool
 	MailEnabled     bool
+	MembershipRule  string // non-empty for a dynamic group
 }
 
 // Enabled reports whether the account may sign in. Unset means enabled.
@@ -36,6 +37,30 @@ func (u *User) PrincipalName(t *Tenant) string {
 	}
 	return preferredUsername(t, u)
 }
+
+// MemberGroups is the user's effective membership: the statically assigned
+// group names followed by the dynamic ones, without duplicates. Every
+// membership consumer (the groups claim, memberOf, members) reads this.
+func (u *User) MemberGroups() []string {
+	if len(u.dynamicGroups) == 0 {
+		return u.Groups
+	}
+	out := make([]string, 0, len(u.Groups)+len(u.dynamicGroups))
+	seen := map[string]bool{}
+	for _, list := range [][]string{u.Groups, u.dynamicGroups} {
+		for _, name := range list {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
+// DynamicGroups returns the names of the dynamic groups the user's attributes
+// currently match.
+func (u *User) DynamicGroups() []string { return u.dynamicGroups }
 
 // MailOrEmpty is the user's mailbox address, which Graph reports as null when
 // there is none.
@@ -80,6 +105,7 @@ func (c *Config) dirGroup(t *Tenant, name string) DirGroup {
 	}
 	g.Description = meta.Description
 	g.Mail = meta.Mail
+	g.MembershipRule = meta.MembershipRule
 	if meta.MailNickname != "" {
 		g.MailNickname = meta.MailNickname
 	}
@@ -118,7 +144,7 @@ func (c *Config) GroupsIn(tid string) []DirGroup {
 		add(t.Groups[i].Name)
 	}
 	for _, u := range c.UsersIn(t.TID) {
-		for _, name := range u.Groups {
+		for _, name := range u.MemberGroups() {
 			add(name)
 		}
 	}
@@ -149,7 +175,7 @@ func (c *Config) GroupsOf(u *User) []DirGroup {
 	}
 	seen := map[string]bool{}
 	out := []DirGroup{}
-	for _, name := range u.Groups {
+	for _, name := range u.MemberGroups() {
 		if name == "" || seen[name] {
 			continue
 		}
@@ -178,7 +204,7 @@ func (c *Config) MembersOf(tid, groupID string) []*User {
 	}
 	out := []*User{}
 	for _, u := range c.UsersIn(tid) {
-		for _, name := range u.Groups {
+		for _, name := range u.MemberGroups() {
 			if name == g.Name {
 				out = append(out, u)
 				break

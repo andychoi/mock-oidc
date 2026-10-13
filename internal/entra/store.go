@@ -223,6 +223,7 @@ func cloneConfig(c *Config) *Config {
 	for i, a := range c.Apps {
 		out.Apps[i] = a
 		out.Apps[i].Roles = append([]string(nil), a.Roles...)
+		out.Apps[i].Claims = append([]ClaimMapping(nil), a.Claims...)
 	}
 	for i, u := range c.Users {
 		out.Users[i] = u
@@ -231,6 +232,7 @@ func cloneConfig(c *Config) *Config {
 		out.Users[i].BusinessPhones = append([]string(nil), u.BusinessPhones...)
 		out.Users[i].Roles = append([]string(nil), u.Roles...)
 		out.Users[i].WIDs = append([]string(nil), u.WIDs...)
+		out.Users[i].dynamicGroups = append([]string(nil), u.dynamicGroups...)
 		out.Users[i].EmailVerified = copyBool(u.EmailVerified)
 		out.Users[i].AccountEnabled = copyBool(u.AccountEnabled)
 	}

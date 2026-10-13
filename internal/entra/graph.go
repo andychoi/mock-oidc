@@ -43,11 +43,27 @@ func graphUser(c *Config, u *User) jsonx.Obj {
 		{Name: "businessPhones", V: phones},
 		{Name: "preferredLanguage", V: nullable(u.PreferredLanguage)},
 		{Name: "accountEnabled", V: u.Enabled()},
+		// $select-only in Graph v1.0 (see selectOnly), but always filterable.
+		{Name: "department", V: nullable(u.Department)},
+		{Name: "companyName", V: nullable(u.CompanyName)},
+		{Name: "employeeId", V: nullable(u.EmployeeID)},
+		{Name: "onPremisesExtensionAttributes", V: jsonx.Obj{
+			{Name: "extensionAttribute1", V: nullable(u.ExtensionAttributes.ExtensionAttribute1)},
+			{Name: "extensionAttribute2", V: nullable(u.ExtensionAttributes.ExtensionAttribute2)},
+			{Name: "extensionAttribute3", V: nullable(u.ExtensionAttributes.ExtensionAttribute3)},
+		}},
 	}
 }
 
-// graphGroup renders the microsoft.graph.group subset.
+// graphGroup renders the microsoft.graph.group subset. A dynamic group
+// carries its rule and the DynamicMembership group type, as in Graph.
 func graphGroup(g DirGroup) jsonx.Obj {
+	groupTypes := jsonx.Arr{}
+	var state any
+	if g.MembershipRule != "" {
+		groupTypes = append(groupTypes, "DynamicMembership")
+		state = "On"
+	}
 	return jsonx.Obj{
 		{Name: "id", V: g.OID},
 		{Name: "displayName", V: g.Name},
@@ -56,6 +72,9 @@ func graphGroup(g DirGroup) jsonx.Obj {
 		{Name: "mailNickname", V: nullable(g.MailNickname)},
 		{Name: "mailEnabled", V: g.MailEnabled},
 		{Name: "securityEnabled", V: g.SecurityEnabled},
+		{Name: "groupTypes", V: groupTypes},
+		{Name: "membershipRule", V: nullable(g.MembershipRule)},
+		{Name: "membershipRuleProcessingState", V: state},
 	}
 }
 
@@ -81,6 +100,45 @@ func graphGroups(gs []DirGroup) []jsonx.Obj {
 		out = append(out, graphGroup(g))
 	}
 	return out
+}
+
+// expandManager renders users for a route that supports $expand=manager,
+// attaching each user's manager (projected by an inner $select) when asked.
+// Only manager is expandable; anything else is refused. A user without a
+// manager has no manager property.
+func expandManager(req *oauth2.Request, cfg *Config, us []*User) ([]jsonx.Obj, *graphError) {
+	items := graphUsers(cfg, us)
+	raw, asked := req.URL.Query()["$expand"]
+	if !asked {
+		return items, nil
+	}
+	expand := strings.TrimSpace(strings.Join(raw, ","))
+	name, inner, _ := strings.Cut(expand, "(")
+	if !strings.EqualFold(strings.TrimSpace(name), "manager") {
+		return nil, unsupportedQuery("Only $expand=manager is supported by this emulator.")
+	}
+	innerSelect := ""
+	if inner != "" {
+		opts, ok := strings.CutSuffix(strings.TrimSpace(inner), ")")
+		key, val, _ := strings.Cut(opts, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "$select") {
+			return nil, unsupportedQuery("Only $select is supported inside $expand=manager(...).")
+		}
+		innerSelect = val
+	}
+	for i, u := range us {
+		m := cfg.ManagerOf(u)
+		if m == nil {
+			continue
+		}
+		mgr := append(jsonx.Obj{{Name: "@odata.type", V: "#" + typeUser}}, graphUser(cfg, m)...)
+		mgr, gerr := applySelect(mgr, innerSelect, typeUser)
+		if gerr != nil {
+			return nil, gerr
+		}
+		items[i] = append(items[i], jsonx.Field{Name: "manager", V: mgr})
+	}
+	return items, nil
 }
 
 // graph dispatches everything under /{basePath}/{graphBase}/. The tenant is
@@ -121,7 +179,11 @@ func (h *Handler) graphUsersRoute(req *oauth2.Request, cfg *Config, caller *Call
 		if req.Method != http.MethodGet {
 			return h.graphErrorResponse(req, notFound("The requested resource does not exist."))
 		}
-		return h.graphCollection(req, cfg, ctxUsers, graphUsers(cfg, cfg.UsersOrderedIn(caller.TID)), typeUser)
+		items, gerr := expandManager(req, cfg, cfg.UsersOrderedIn(caller.TID))
+		if gerr != nil {
+			return h.graphErrorResponse(req, gerr)
+		}
+		return h.renderCollection(req, cfg, ctxUsers, items, typeUser, true)
 	}
 	u := cfg.UserByUPNOrOID(caller.TID, path[0])
 	if u == nil {
@@ -137,7 +199,11 @@ func (h *Handler) graphUserRoute(req *oauth2.Request, cfg *Config, caller *Calle
 	sub := strings.Join(path, "/")
 	switch {
 	case get && sub == "":
-		return h.graphEntity(req, cfg, ctxUserEntity, graphUser(cfg, u), typeUser)
+		items, gerr := expandManager(req, cfg, []*User{u})
+		if gerr != nil {
+			return h.graphErrorResponse(req, gerr)
+		}
+		return h.renderEntity(req, cfg, ctxUserEntity, items[0], typeUser, true)
 	// Groups are flat here, so the transitive closure is the direct one.
 	case get && (sub == "memberOf" || sub == "transitiveMemberOf"):
 		return h.graphCollection(req, cfg, ctxDirObjects, graphGroups(cfg.GroupsOf(u)), typeGroup)
