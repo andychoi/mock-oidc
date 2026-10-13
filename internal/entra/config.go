@@ -52,9 +52,18 @@ type Config struct {
 // every flow; an entry here only supplies the app roles an app-only token
 // carries (§8 of the Graph design).
 type App struct {
-	ClientID string   `json:"clientId"`
-	TID      string   `json:"tid"`
-	Roles    []string `json:"roles"`
+	ClientID string         `json:"clientId"`
+	TID      string         `json:"tid"`
+	Roles    []string       `json:"roles"`
+	Claims   []ClaimMapping `json:"claims"`
+}
+
+// ClaimMapping adds one directory attribute to the ID tokens issued to an app,
+// the way an Entra claims-mapping policy does. Source names a user attribute
+// (see claimSources).
+type ClaimMapping struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
 }
 
 // Tenant is one emulated Entra tenant.
@@ -70,7 +79,9 @@ type Tenant struct {
 
 // Group is optional metadata for a group name used by this tenant's users.
 // Membership itself lives on the user (User.Groups); a name used by a user but
-// not declared here still becomes a Graph group, with empty metadata.
+// not declared here still becomes a Graph group, with empty metadata. A group
+// with a MembershipRule is a dynamic group: its members are computed from the
+// rule and cannot be assigned statically.
 type Group struct {
 	Name            string `json:"name"`
 	Description     string `json:"description"`
@@ -79,7 +90,13 @@ type Group struct {
 	OID             string `json:"oid"`
 	SecurityEnabled *bool  `json:"securityEnabled"`
 	MailEnabled     *bool  `json:"mailEnabled"`
+	MembershipRule  string `json:"membershipRule"`
+
+	rule rule // compiled MembershipRule; immutable, so snapshots may share it
 }
+
+// Dynamic reports whether the group's membership is rule-based.
+func (g *Group) Dynamic() bool { return g.MembershipRule != "" }
 
 // Consent is a pre-granted admin consent of a client in a tenant.
 type Consent struct {
@@ -114,6 +131,24 @@ type User struct {
 	Roles             []string `json:"roles"`
 	WIDs              []string `json:"wids"`
 	Manager           string   `json:"manager"`
+
+	// Organization data: the attributes HR sync fills in and dynamic group
+	// rules match on.
+	Department          string   `json:"department"`
+	CompanyName         string   `json:"companyName"`
+	EmployeeID          string   `json:"employeeId"`
+	ExtensionAttributes ExtAttrs `json:"onPremisesExtensionAttributes"`
+
+	dynamicGroups []string // memberships computed from dynamic group rules by normalize
+}
+
+// ExtAttrs is the subset of Graph's onPremisesExtensionAttributes this
+// emulator supports: extensionAttribute1-3 (Entra has 1-15). Strict decoding
+// rejects the others.
+type ExtAttrs struct {
+	ExtensionAttribute1 string `json:"extensionAttribute1"`
+	ExtensionAttribute2 string `json:"extensionAttribute2"`
+	ExtensionAttribute3 string `json:"extensionAttribute3"`
 }
 
 var (
@@ -194,6 +229,9 @@ func (c *Config) normalize() error {
 		if a.TID != "" && !tenants[a.TID] {
 			return fmt.Errorf("app %s: unknown tid %q", a.ClientID, a.TID)
 		}
+		if err := normalizeClaims(a); err != nil {
+			return err
+		}
 	}
 	for i := range c.Consents {
 		cs := &c.Consents[i]
@@ -237,16 +275,47 @@ func (c *Config) normalize() error {
 		}
 	}
 	// Managers resolve against the whole user set, so they need a second pass.
+	// A manager may be named by username, object ID or UPN; it is stored as
+	// the username.
 	for i := range c.Users {
 		u := &c.Users[i]
 		if u.Manager == "" {
 			continue
+		}
+		if !users[u.TID+"/"+u.Manager] {
+			if m := c.UserByUPNOrOID(u.TID, u.Manager); m != nil {
+				u.Manager = m.Username
+			}
 		}
 		if u.Manager == u.Username {
 			return fmt.Errorf("user %s: manager cannot be the user itself", u.Username)
 		}
 		if !users[u.TID+"/"+u.Manager] {
 			return fmt.Errorf("user %s: unknown manager %q in tenant %s", u.Username, u.Manager, u.TID)
+		}
+	}
+	// Dynamic memberships depend on every attribute and on the manager chain,
+	// so they are computed last.
+	return c.evaluateDynamicGroups()
+}
+
+// evaluateDynamicGroups rejects static members of dynamic groups and computes
+// every user's dynamic memberships, in the tenant's declared group order.
+func (c *Config) evaluateDynamicGroups() error {
+	for i := range c.Users {
+		u := &c.Users[i]
+		u.dynamicGroups = nil
+		t := c.Tenant(u.TID)
+		for _, name := range u.Groups {
+			if g := t.groupMeta(name); g != nil && g.Dynamic() {
+				return fmt.Errorf("user %s: group %q is dynamic; its members come from its membershipRule", u.Username, name)
+			}
+		}
+		for j := range t.Groups {
+			g := &t.Groups[j]
+			if g.Dynamic() && g.rule.match(c, t, u) {
+				u.dynamicGroups = append(u.dynamicGroups, g.Name)
+			}
 		}
 	}
 	return nil
@@ -268,6 +337,49 @@ func normalizeGroups(t *Tenant) error {
 		g.OID = strings.ToLower(strings.TrimSpace(g.OID))
 		if g.OID != "" && !guidRE.MatchString(g.OID) {
 			return fmt.Errorf("tenant %s: group %s: oid must be a GUID", t.TID, g.Name)
+		}
+		g.MembershipRule = strings.TrimSpace(g.MembershipRule)
+		g.rule = nil
+		if g.Dynamic() {
+			r, err := parseRule(g.MembershipRule)
+			if err != nil {
+				return fmt.Errorf("tenant %s: group %s: membershipRule: %w", t.TID, g.Name, err)
+			}
+			g.rule = r
+		}
+	}
+	return nil
+}
+
+// reservedClaims are the claims Entra mode emits itself; a claims mapping may
+// not overwrite them.
+var reservedClaims = map[string]bool{
+	"iss": true, "aud": true, "iat": true, "nbf": true, "exp": true, "tid": true, "oid": true,
+	"sub": true, "ver": true, "name": true, "preferred_username": true, "uti": true, "nonce": true,
+	"email": true, "xms_edov": true, "amr": true, "given_name": true, "family_name": true,
+	"roles": true, "wids": true, "groups": true, "_claim_names": true, "_claim_sources": true,
+	"scp": true, "azp": true, "appid": true, "idp": true,
+}
+
+// normalizeClaims validates an app's claims mappings.
+func normalizeClaims(a *App) error {
+	seen := map[string]bool{}
+	for i := range a.Claims {
+		m := &a.Claims[i]
+		m.Name = strings.TrimSpace(m.Name)
+		m.Source = strings.TrimSpace(m.Source)
+		if m.Name == "" {
+			return fmt.Errorf("app %s: claims[%d]: name is required", a.ClientID, i)
+		}
+		if reservedClaims[m.Name] {
+			return fmt.Errorf("app %s: claim %q is emitted by Entra mode itself", a.ClientID, m.Name)
+		}
+		if seen[m.Name] {
+			return fmt.Errorf("app %s: duplicate claim %q", a.ClientID, m.Name)
+		}
+		seen[m.Name] = true
+		if _, ok := claimSources[strings.ToLower(m.Source)]; !ok {
+			return fmt.Errorf("app %s: claim %s: unsupported source %q", a.ClientID, m.Name, m.Source)
 		}
 	}
 	return nil

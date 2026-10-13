@@ -64,7 +64,7 @@ func (h *Handler) testAPI(req *oauth2.Request, action string) routing.Response {
 		seen := map[string]bool{}
 		var names []string
 		for _, u := range cfg.UsersIn(t.TID) {
-			for _, g := range u.Groups {
+			for _, g := range u.MemberGroups() {
 				if !seen[g] {
 					seen[g] = true
 					names = append(names, g)
@@ -111,7 +111,8 @@ func (h *Handler) mintToken(req *oauth2.Request) routing.Response {
 	}
 	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
 		OverageSelfHosted: cfg.OverageSelfHosted(), Tenant: cfg.Tenant(u.TID), User: u,
-		ClientID: clientID, Scopes: scopes, Now: h.now(), Expiry: cfg.TokenExpiry}
+		ClientID: clientID, Scopes: scopes, Now: h.now(), Expiry: cfg.TokenExpiry,
+		MappedClaims: cfg.MappedClaims(clientID, u)}
 	return routing.JSON(jsonx.Obj{
 		{Name: "token_type", V: "Bearer"},
 		{Name: "expires_in", V: cfg.TokenExpiry},

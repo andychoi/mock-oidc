@@ -176,7 +176,8 @@ grant has its own contract.
 | `user.jobTitle`, `officeLocation`, `businessPhones`, `mobilePhone`, `preferredLanguage` | — | Graph profile fields |
 | `user.roles` | — | `roles` claim in the ID **and** access token |
 | `user.wids` | — | `wids` claim (tenant-wide directory roles; Global Administrator is `62e90394-69f5-4237-9190-012177145e10`) |
-| `user.manager` | — | a username in the same tenant; `/users/{id}/manager` and `/directReports` |
+| `user.manager` | — | a username, object ID or UPN in the same tenant (stored as the username); `/users/{id}/manager` and `/directReports` |
+| `user.department`, `companyName`, `employeeId`, `onPremisesExtensionAttributes`, `tenant.groups[].membershipRule`, `apps[].claims` | — | org directory: see [`04-org-directory-design.md`](04-org-directory-design.md) |
 
 Every one of these is additive: `ParseConfig` rejects unknown fields, so a config written for today
 still parses, and a config using the new fields fails loudly on an old binary.
@@ -273,8 +274,10 @@ today. This is the one existing assertion the feature changes (see §9).
 |---|---|
 | `$top` | default `defaultPageSize`, clamped to `[1, maxPageSize]`; invalid → default |
 | `$skiptoken` | non-negative integer offset; invalid → `0` |
-| `$select` | comma list of known fields; `id` is always included; an unknown property → `400 Request_UnsupportedQuery` with Graph's "Could not find a property named …" message |
-| `$filter`, `$orderby`, `$expand`, `$search`, `$count` | `400 Request_UnsupportedQuery` — an explicit refusal beats silently returning the unfiltered set |
+| `$select` | comma list of known fields; `id` is always included; an unknown property → `400 Request_UnsupportedQuery` with Graph's "Could not find a property named …" message. Without `$select`, `$select`-only properties (the org attributes) are omitted, as in Graph |
+| `$filter` | a subset (`eq`, `ne`, `in`, `startsWith`, `any`, `and`/`or`/`not`) on collections — see [`04-org-directory-design.md`](04-org-directory-design.md) §5; anything else → `400 Request_UnsupportedQuery` |
+| `$expand` | `manager` only, on `/me`, `/users/{id}` and `/users` (§6 of the org design); anything else → `400 Request_UnsupportedQuery` |
+| `$orderby`, `$search`, `$count` | `400 Request_UnsupportedQuery` — an explicit refusal beats silently returning a wrong answer |
 
 ## 6. Token changes
 

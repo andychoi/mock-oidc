@@ -159,7 +159,10 @@ the JSON config. With neither, the server behaves exactly as before.
 
 Demo tenants (`entra-demo.json`): Corp `11111111-…` (group names), Customer X
 `22222222-…` (group object IDs, consent required, overage above 5 groups),
-Partner P `33333333-…` (consent required). The account picker needs no password.
+Partner P `33333333-…` (consent required), and Org Chart `44444444-…` (org codes
+in `extensionAttribute1`, dynamic `GRP_DEPT_…` groups, a `Direct Reports for`
+group, and an `org_code` claim mapped into the `iam` app's ID token). The account
+picker needs no password.
 Users cover MFA-required (`mfa`), disabled (`disabled`), overage (`many`), a
 manager chain (`leo`/`mina` report to `jane`), and tenant admins for admin
 consent (`jane`, `custadmin`, `partneradmin`).
@@ -218,9 +221,22 @@ claim and a Graph group are one identifier. With Graph on, the overage claim's
 `graph.microsoft.com`, so a relying party can follow it inside the test
 environment (`"overageEndpoint": "microsoft"` restores Entra's URL).
 
-Query options: `$top` (default 100, max 999), `$skiptoken`, `$select`.
-`$filter`, `$orderby`, `$expand`, `$search` and `$count` are refused with
-`400 Request_UnsupportedQuery` rather than silently ignored.
+Query options: `$top` (default 100, max 999), `$skiptoken`, `$select`, a
+`$filter` subset on collections (`eq`, `ne`, `in`, `startsWith`, `any`,
+`and`/`or`/`not`, e.g.
+`onPremisesExtensionAttributes/extensionAttribute1 eq 'DEPT001'`), and
+`$expand=manager` on `/me` and `/users`. `$orderby`, `$search`, `$count` and
+anything outside the subset are refused with `400 Request_UnsupportedQuery`
+rather than silently ignored.
+
+Org directory ([docs/entra/04-org-directory-design.md](docs/entra/04-org-directory-design.md)):
+users carry `department`, `companyName`, `employeeId` and
+`onPremisesExtensionAttributes.extensionAttribute1-3` (`$select`-only on Graph,
+as in v1.0). A declared group with a `membershipRule`, such as
+`(user.extensionAttribute1 -eq "DEPT001")`, is a dynamic group whose members are
+recomputed on every change, so an admin-UI edit of an org code moves the user
+between groups on the next token and Graph call. `apps[].claims` maps
+attributes into an app's ID token.
 
 Reads need a Graph-audience access token this server minted; `/me` and
 `userinfo` additionally need a **delegated** token. With
@@ -237,8 +253,8 @@ object ID), `GET /entra/_entra/users?tid=…` (the directory as Graph sees it),
 `scope`) to get a usable token without driving the picker.
 
 Not emulated: real Conditional Access, Microsoft's UI and exact error wording,
-refresh-token redemption, implicit/hybrid flows, Graph writes, `$filter` and the
-rest of OData, nested groups (`transitiveMemberOf` equals `memberOf`), app
+refresh-token redemption, implicit/hybrid flows, Graph writes, OData beyond the
+subset above, nested groups (`transitiveMemberOf` equals `memberOf`), app
 registrations, device code flow, and the Graph surface beyond accounts and
 groups.
 

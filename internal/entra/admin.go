@@ -32,7 +32,9 @@ func (h *Handler) AdminSnapshot() any {
 			{Name: "oid", V: u.OID},
 			{Name: "name", V: u.Name},
 			{Name: "email", V: u.Email},
+			{Name: "emailVerified", V: u.EmailVerified},
 			{Name: "groups", V: u.Groups},
+			{Name: "dynamicGroups", V: u.DynamicGroups()},
 			{Name: "amr", V: u.AMR},
 			{Name: "admin", V: u.Admin},
 			{Name: "error", V: u.Error},
@@ -48,6 +50,14 @@ func (h *Handler) AdminSnapshot() any {
 			{Name: "roles", V: u.Roles},
 			{Name: "wids", V: u.WIDs},
 			{Name: "manager", V: u.Manager},
+			{Name: "department", V: u.Department},
+			{Name: "companyName", V: u.CompanyName},
+			{Name: "employeeId", V: u.EmployeeID},
+			{Name: "onPremisesExtensionAttributes", V: jsonx.Obj{
+				{Name: "extensionAttribute1", V: u.ExtensionAttributes.ExtensionAttribute1},
+				{Name: "extensionAttribute2", V: u.ExtensionAttributes.ExtensionAttribute2},
+				{Name: "extensionAttribute3", V: u.ExtensionAttributes.ExtensionAttribute3},
+			}},
 		})
 	}
 	consents := jsonx.Arr{}
@@ -88,8 +98,9 @@ func (h *Handler) AdminSnapshot() any {
 	}
 }
 
-// tenantGroups renders a tenant's groups as the Graph surface sees them, so
-// the admin UI can show the object ID a group claim will carry.
+// tenantGroups renders a tenant's declared groups: the object ID a group
+// claim will carry (oid), plus the configured metadata as-is, so the admin UI
+// can round-trip it on a tenant save without pinning derived values.
 func tenantGroups(t Tenant) jsonx.Arr {
 	out := jsonx.Arr{}
 	for _, g := range t.Groups {
@@ -101,6 +112,12 @@ func tenantGroups(t Tenant) jsonx.Arr {
 			{Name: "name", V: g.Name},
 			{Name: "description", V: g.Description},
 			{Name: "oid", V: oid},
+			{Name: "configuredOid", V: g.OID},
+			{Name: "mailNickname", V: g.MailNickname},
+			{Name: "mail", V: g.Mail},
+			{Name: "securityEnabled", V: g.SecurityEnabled},
+			{Name: "mailEnabled", V: g.MailEnabled},
+			{Name: "membershipRule", V: g.MembershipRule},
 		})
 	}
 	return out

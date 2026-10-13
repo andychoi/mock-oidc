@@ -52,7 +52,8 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	}
 	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
 		OverageSelfHosted: cfg.OverageSelfHosted(), Tenant: t, User: u, ClientID: c.req.ClientID,
-		Nonce: c.req.Nonce, Scopes: c.req.Scope, Now: h.now(), Expiry: cfg.TokenExpiry}
+		Nonce: c.req.Nonce, Scopes: c.req.Scope, Now: h.now(), Expiry: cfg.TokenExpiry,
+		MappedClaims: cfg.MappedClaims(c.req.ClientID, u)}
 	resp := jsonx.Obj{
 		{Name: "token_type", V: "Bearer"},
 		{Name: "scope", V: strings.Join(c.req.Scope, " ")},
