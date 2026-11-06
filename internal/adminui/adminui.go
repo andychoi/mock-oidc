@@ -124,6 +124,9 @@ func (a *Handler) Handle(req *oauth2.Request) routing.Response {
 	trimmed := strings.Trim(req.URL.Path, "/")
 	rest := strings.TrimPrefix(trimmed, "admin")
 	rest = strings.TrimPrefix(rest, "/")
+	if rest == "mcp" {
+		return a.serveMCP(req)
+	}
 	if strings.HasPrefix(rest, "api/") {
 		if req.Method != http.MethodGet && req.Method != http.MethodPost && req.Method != http.MethodPut && req.Method != http.MethodDelete {
 			return routing.MethodNotAllowed()
