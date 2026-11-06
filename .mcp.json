@@ -9,6 +9,22 @@
         "stdio"
       ],
       "description": "repowise: codebase intelligence \u2014 docs, graph, git signals, dead code, decisions"
+    },
+    "context7": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@4.5.1"],
+      "env": {}
+    },
+    "agent-browser": {
+      "type": "stdio",
+      "command": "agent-browser",
+      "args": ["mcp"],
+      "env": {}
+    },
+    "mock-oidc": {
+      "type": "http",
+      "url": "https://oidc.dev.test/admin/mcp"
     }
   }
 }

@@ -1,9 +1,9 @@
 package entra
 
 import (
+	"errors"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/andychoi/mock-oidc/internal/jsonx"
 	"github.com/andychoi/mock-oidc/internal/oauth2"
@@ -81,9 +81,8 @@ func (h *Handler) testAPI(req *oauth2.Request, action string) routing.Response {
 	return routing.NotFound("not found")
 }
 
-// mintToken issues an access token for a configured account. The form or
-// query carries tid, username, optional clientId (default "mock") and
-// optional scope (default "openid profile email").
+// mintToken parses the form or query (tid, username, optional clientId and
+// scope) and issues tokens through AdminMintToken.
 func (h *Handler) mintToken(req *oauth2.Request) routing.Response {
 	param := func(name string) string {
 		if v := req.FormParam(name); v != "" {
@@ -91,33 +90,15 @@ func (h *Handler) mintToken(req *oauth2.Request) routing.Response {
 		}
 		return req.QueryParam(name)
 	}
-	cfg := h.conf()
-	tid, username := param("tid"), param("username")
-	u := cfg.User(tid, username)
-	if u == nil {
+	tok, err := h.AdminMintToken(IssuerOrigin(req), MintInput{
+		TID: param("tid"), Username: param("username"), ClientID: param("clientId"), Scope: param("scope"),
+	})
+	switch {
+	case errors.Is(err, ErrNotFound):
 		return routing.ErrorResponse(oauth2.InvalidRequest(
 			"AADSTS50034: The user account does not exist in this directory."))
-	}
-	if !u.Enabled() {
+	case errors.Is(err, errAccountDisabled):
 		return routing.ErrorResponse(oauth2.InvalidGrant("AADSTS50057: The user account is disabled."))
 	}
-	clientID := param("clientId")
-	if clientID == "" {
-		clientID = "mock"
-	}
-	scopes := strings.Fields(param("scope"))
-	if len(scopes) == 0 {
-		scopes = []string{"openid", "profile", "email"}
-	}
-	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
-		OverageSelfHosted: cfg.OverageSelfHosted(), Tenant: cfg.Tenant(u.TID), User: u,
-		ClientID: clientID, Scopes: scopes, Now: h.now(), Expiry: cfg.TokenExpiry,
-		MappedClaims: cfg.MappedClaims(clientID, u)}
-	return routing.JSON(jsonx.Obj{
-		{Name: "token_type", V: "Bearer"},
-		{Name: "expires_in", V: cfg.TokenExpiry},
-		{Name: "scope", V: strings.Join(scopes, " ")},
-		{Name: "access_token", V: h.keys.Sign(AccessTokenClaims(in))},
-		{Name: "id_token", V: h.keys.Sign(IDTokenClaims(in))},
-	})
+	return routing.JSON(tok.Obj())
 }

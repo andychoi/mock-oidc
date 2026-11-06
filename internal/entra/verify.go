@@ -168,7 +168,7 @@ func (h *Handler) ValidateAccessToken(req *oauth2.Request, cfg *Config, bearer s
 		return nil, invalidToken()
 	}
 	tid := strings.ToLower(claimString(claims, "tid"))
-	if tid == "" || claimString(claims, "iss") != Issuer(origin(req), cfg.BasePath, tid) {
+	if tid == "" || claimString(claims, "iss") != Issuer(IssuerOrigin(req), cfg.BasePath, tid) {
 		return nil, invalidToken()
 	}
 	now, skew := h.now().Unix(), cfg.ClockSkew()

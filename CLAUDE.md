@@ -34,6 +34,8 @@ toggles (interactiveLogin, rotateRefreshToken, entra on/off — atomics on `*ser
 entra toggle gates the front route with 405s). All edits are in-memory; resets restore the
 config-file seed. `adminui` imports `entra`/`directory` directly; `entra` still imports neither
 `adminui` nor `config`. UI changes need no build step — edit `internal/adminui/static/` and restart.
+The same operations are MCP tools at `/admin/mcp` (`mcp.go` transport, `mcp_tools.go` registry; each
+tool's schema and decoder derive from its Go input struct).
 
 ## Rules
 
@@ -46,7 +48,7 @@ config-file seed. `adminui` imports `entra`/`directory` directly; `entra` still 
 - No new module dependencies.
 - CI gates: `gofmt -l .` empty (excluding `docs/`), `go vet ./...`, `go build ./...`, `go test ./...`;
   also run `go test -race ./...` before finishing.
-- US English in comments and docs. Commit messages end with `Co-authored by AI`.
+- US English in comments and docs.
 
 ## Commands
 

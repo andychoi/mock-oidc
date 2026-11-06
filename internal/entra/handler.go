@@ -118,16 +118,16 @@ func (h *Handler) resolveScope(seg string) (scope, *oauth2.Error) {
 	return scope{}, oauth2.InvalidRequest("AADSTS90002: Tenant '" + seg + "' not found.")
 }
 
-// origin is the proxy-aware scheme://host[:port], the same derivation the
-// built-in issuer uses.
-func origin(req *oauth2.Request) string {
+// IssuerOrigin is the proxy-aware scheme://host[:port], the same derivation
+// the built-in issuer uses.
+func IssuerOrigin(req *oauth2.Request) string {
 	u := req.ProxyAwareURL()
 	return u.Scheme + "://" + u.Host
 }
 
 func (h *Handler) discovery(req *oauth2.Request, sc scope) routing.Response {
 	cfg := h.conf()
-	base := origin(req) + "/" + cfg.BasePath
+	base := IssuerOrigin(req) + "/" + cfg.BasePath
 	issuerTID := "{tenantid}"
 	if !sc.Multi() {
 		issuerTID = sc.Tenant.TID
