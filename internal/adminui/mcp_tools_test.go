@@ -20,7 +20,6 @@ func fullHandler(t *testing.T) *Handler {
 		&fakeSettings{st: AdminSettings{EntraConfigured: true, EntraEnabled: true}})
 }
 
-// decoded renders a jsonx value and parses it back as plain JSON.
 func decoded(t *testing.T, v any) map[string]any {
 	t.Helper()
 	var m map[string]any
@@ -87,8 +86,6 @@ func TestToolSchemaGolden(t *testing.T) {
 	}
 }
 
-// The nested domain schema follows entra.User, so a field added there is
-// advertised without touching the tool.
 func TestToolSchemaReflectsDomainUser(t *testing.T) {
 	for _, tl := range registry {
 		if tl.name != "entra_create_user" {
@@ -171,9 +168,6 @@ func TestToolAvailabilityFollowsOwners(t *testing.T) {
 	}
 }
 
-// Every admin operation of the state owners is either reachable as an MCP
-// tool or excluded here with a reason, so a new owner method fails this test
-// until someone decides.
 func TestToolsCoverOwnerOperations(t *testing.T) {
 	bound := map[string]string{
 		"entra.AdminSnapshot":        "entra_get_state",

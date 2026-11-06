@@ -298,7 +298,6 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 	return notFound()
 }
 
-// settingsObj renders the live toggles (settings API and settings_get).
 func settingsObj(st AdminSettings) jsonx.Obj {
 	return jsonx.Obj{
 		{Name: "interactiveLogin", V: st.InteractiveLogin},
@@ -309,7 +308,6 @@ func settingsObj(st AdminSettings) jsonx.Obj {
 	}
 }
 
-// directoryArr renders the login directory (directory API and directory_list).
 func directoryArr(dir *directory.Directory) jsonx.Arr {
 	arr := jsonx.Arr{}
 	for _, u := range dir.List() {

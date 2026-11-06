@@ -11,19 +11,12 @@ import (
 	"github.com/andychoi/mock-oidc/internal/jsonx"
 )
 
-// inputSpec is everything derived from a tool's Go input struct: the JSON
-// Schema advertised in tools/list and the rules strictDecode enforces, so the
-// two cannot disagree.
 type inputSpec struct {
 	schema   jsonx.Obj
-	required []string            // top-level properties that must be present and non-null
-	enums    map[string][]string // top-level string properties limited to these values
+	required []string
+	enums    map[string][]string
 }
 
-// specFor reflects a tool input struct. Field tags: json names the property,
-// mcp:"required" marks it required, enum:"a,b" limits a string, desc:"..."
-// documents it. Nested structs (the entra and directory domain types) are
-// reflected the same way.
 func specFor(t reflect.Type) inputSpec {
 	if t.Kind() != reflect.Struct {
 		panic("adminui: tool input must be a struct, got " + t.String())
@@ -55,10 +48,6 @@ func specFor(t reflect.Type) inputSpec {
 	return spec
 }
 
-// schemaFor renders the JSON Schema of one Go type. It panics on a kind it
-// cannot describe (maps, interfaces, embedded fields, ...) so a new domain
-// field of such a kind fails at package init instead of being advertised
-// wrongly.
 func schemaFor(t reflect.Type, where string) jsonx.Obj {
 	switch t.Kind() {
 	case reflect.String:
@@ -81,7 +70,6 @@ func schemaFor(t reflect.Type, where string) jsonx.Obj {
 	panic(fmt.Sprintf("adminui: no JSON Schema for %s (%s)", where, t))
 }
 
-// jsonFields lists the fields encoding/json decodes into.
 func jsonFields(t reflect.Type) []reflect.StructField {
 	var out []reflect.StructField
 	for i := range t.NumField() {
@@ -105,10 +93,6 @@ func jsonName(f reflect.StructField) string {
 	return name
 }
 
-// strictDecode parses tool arguments into out under the spec's rules:
-// unknown fields are rejected at every depth, required properties must be
-// present and non-null, and enum properties must hold a listed value. Absent
-// or null arguments count as {}.
 func strictDecode(raw json.RawMessage, spec inputSpec, out any) error {
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
 		raw = json.RawMessage("{}")

@@ -9,8 +9,6 @@ import (
 	"github.com/andychoi/mock-oidc/internal/jsonx"
 )
 
-// owner names the state owner a tool drives. A tool whose owner is not wired
-// into the Handler is absent from tools/list and unknown to tools/call.
 type owner uint8
 
 const (
@@ -19,7 +17,6 @@ const (
 	ownerEntra
 )
 
-// effect is what a tool does to state, advertised as MCP tool annotations.
 type effect uint8
 
 const (
@@ -28,16 +25,13 @@ const (
 	destroys                   // destructiveHint
 )
 
-// toolCtx is what a tool body may touch. The owner the tool declares is
-// non-nil (available guarantees it).
 type toolCtx struct {
 	entra    *entra.Handler
 	dir      *directory.Directory
 	settings Settings
-	origin   string // IssuerOrigin of the MCP request, for minted token issuers
+	origin   string
 }
 
-// tool is one registry row, built only by defineTool.
 type tool struct {
 	name        string
 	description string
@@ -47,9 +41,6 @@ type tool struct {
 	call        func(c toolCtx, args json.RawMessage) (jsonx.Obj, error)
 }
 
-// defineTool derives a tool's input schema and its strict decoder from the
-// same Go input type In, so what tools/list advertises is what tools/call
-// accepts.
 func defineTool[In any](name, description string, o owner, e effect, fn func(toolCtx, In) (jsonx.Obj, error)) tool {
 	spec := specFor(reflect.TypeFor[In]())
 	return tool{
@@ -64,7 +55,6 @@ func defineTool[In any](name, description string, o owner, e effect, fn func(too
 	}
 }
 
-// registry is the one tool list; its order is the tools/list order.
 var registry = []tool{
 	defineTool("settings_get", "Read the live runtime toggles (interactiveLogin, rotateRefreshToken, entra, graph).",
 		ownerSettings, reads, settingsGet),
@@ -238,9 +228,6 @@ func entraMintToken(c toolCtx, in mintInput) (jsonx.Obj, error) {
 	return tok.Obj(), nil
 }
 
-// available is the single availability rule shared by tools/list and
-// tools/call. Entra tools stay available while the entra toggle is off:
-// they edit state exactly as the admin UI does.
 func (a *Handler) available(t tool) bool {
 	switch t.owner {
 	case ownerSettings:
@@ -253,7 +240,6 @@ func (a *Handler) available(t tool) bool {
 	return false
 }
 
-// toolDefs renders the available tools for tools/list.
 func (a *Handler) toolDefs() jsonx.Arr {
 	out := jsonx.Arr{}
 	for _, t := range registry {
@@ -273,7 +259,6 @@ func (a *Handler) toolDefs() jsonx.Arr {
 	return out
 }
 
-// lookupTool finds an available tool by name.
 func (a *Handler) lookupTool(name string) (tool, bool) {
 	for _, t := range registry {
 		if t.name == name && a.available(t) {
@@ -283,9 +268,6 @@ func (a *Handler) lookupTool(name string) (tool, bool) {
 	return tool{}, false
 }
 
-// runTool calls an available tool and renders its MCP CallToolResult. Tool
-// failures (bad arguments, owner validation) are results with isError, so the
-// model reads the message verbatim and can retry.
 func (a *Handler) runTool(t tool, origin string, args json.RawMessage) jsonx.Obj {
 	out, err := t.call(toolCtx{entra: a.entra, dir: a.dir, settings: a.settings, origin: origin}, args)
 	if err != nil {

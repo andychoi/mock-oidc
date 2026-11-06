@@ -24,7 +24,6 @@ import (
 
 const modernVersion = "2026-07-28"
 
-// legacyVersions are the initialize-based versions, newest first.
 var legacyVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
 
 const metaProtocolVersion = "io.modelcontextprotocol/protocolVersion"
@@ -44,8 +43,6 @@ type rpcError struct {
 	data    jsonx.Obj
 }
 
-// era is the protocol generation a request speaks. It selects the method
-// table and how JSON-RPC errors map to HTTP statuses.
 type era uint8
 
 const (
@@ -111,11 +108,6 @@ type rpcRequest struct {
 	Params  json.RawMessage `json:"params"`
 }
 
-// serveMCP answers /admin/mcp. Handle has already answered OPTIONS. Checks
-// run in order: method (405), Origin (403), Content-Type (415), envelope
-// (400), notification (202), era-specific version and headers, dispatch.
-// Responses never pass through routing.ErrorResponse, so messages keep their
-// case.
 func (a *Handler) serveMCP(req *oauth2.Request) routing.Response {
 	if req.Method != http.MethodPost {
 		resp := routing.Response{Status: http.StatusMethodNotAllowed, Header: http.Header{}}
@@ -279,8 +271,6 @@ func serverInfo() jsonx.Obj {
 	return jsonx.Obj{{Name: "name", V: "mock-oidc"}, {Name: "version", V: version}}
 }
 
-// instructions tells the model what this server's tools change and which
-// groups are absent.
 func (a *Handler) instructions() string {
 	s := "Manages the running mock-oidc server's in-memory state: runtime settings, the login-page directory " +
 		"and Entra mode (tenants, users, consents, signing keys, token minting). Edits are lost on restart; " +
@@ -327,8 +317,6 @@ func mcpPing(*Handler, *oauth2.Request, json.RawMessage) (jsonx.Obj, *rpcError) 
 	return jsonx.Obj{{Name: "resultType", V: "complete"}}, nil
 }
 
-// mcpToolsList answers both eras alike; ttlMs 0 because the list follows the
-// server's wiring and runtime state.
 func (a *Handler) mcpToolsList(_ *oauth2.Request, _ json.RawMessage) (jsonx.Obj, *rpcError) {
 	return jsonx.Obj{
 		{Name: "resultType", V: "complete"},

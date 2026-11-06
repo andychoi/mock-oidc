@@ -57,7 +57,6 @@ func rpcBody(method string, params any) string {
 	return string(b)
 }
 
-// callLegacy runs tools/call without _meta and returns the tool result.
 func callLegacy(t *testing.T, rt *routing.Router, name string, args any) map[string]any {
 	t.Helper()
 	r := postMCP(t, rt, rpcBody("tools/call", map[string]any{"name": name, "arguments": args}), nil)
@@ -306,8 +305,6 @@ func TestMCPModernEra(t *testing.T) {
 	}
 }
 
-// The same edit made through the REST API and through MCP leaves the same
-// Entra and directory state.
 func TestMCPParityWithAdminAPI(t *testing.T) {
 	restDir, mcpDir := directory.New(nil), directory.New(nil)
 	rest := newRouter(testEntra(t), restDir, nil)
@@ -342,7 +339,7 @@ func TestMCPParityWithAdminAPI(t *testing.T) {
 
 	snapshot := func(rt *routing.Router) map[string]any {
 		m := adminSnapshot(t, func(method, target, b string) *http.Response { return do(t, rt, method, target, b) })
-		delete(m, "keys") // each handler generates its own signing key
+		delete(m, "keys")
 		return m
 	}
 	if a, b := snapshot(rest), snapshot(mcp); !reflect.DeepEqual(a, b) {

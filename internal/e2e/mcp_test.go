@@ -10,7 +10,6 @@ import (
 
 var mcpHeaders = map[string]string{"Content-Type": "application/json"}
 
-// mcp posts one JSON-RPC request to /admin/mcp and returns its result.
 func mcp(t *testing.T, base, method string, params any) map[string]any {
 	t.Helper()
 	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
@@ -24,7 +23,6 @@ func mcp(t *testing.T, base, method string, params any) map[string]any {
 	return msg.Result
 }
 
-// mcpTool calls a tool and returns its structured result, failing on isError.
 func mcpTool(t *testing.T, base, name string, args any) map[string]any {
 	t.Helper()
 	res := mcp(t, base, "tools/call", map[string]any{"name": name, "arguments": args})
@@ -83,8 +81,6 @@ func TestMCPCreateUserMintsVerifiableToken(t *testing.T) {
 	verifyEntraJWT(t, base, rotated)
 }
 
-// Every settings_set enum value advertised in the schema is accepted by the
-// real server, so the enum cannot drift from Server.AdminSetSetting.
 func TestMCPSettingsEnumMatchesServer(t *testing.T) {
 	_, base := startServer(t, entraConfig)
 	var enum []any
@@ -138,8 +134,6 @@ func TestMCPWithoutEntraConfig(t *testing.T) {
 	}
 }
 
-// /admin/mcp rides the existing /admin front route: the issuer named mcp and
-// paths ending in /mcp keep their navikt behavior.
 func TestMCPDoesNotShadowIssuers(t *testing.T) {
 	_, base := startServer(t, entraConfig)
 	_, doc := entraGetJSON(t, base+"/mcp/.well-known/openid-configuration", nil)
