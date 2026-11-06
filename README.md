@@ -130,6 +130,33 @@ The admin JSON API lives under `/admin/api/` (`settings`, `entra`,
 `entra/tenants`, `entra/users`, `entra/consents`, `directory`); see
 `internal/adminui/adminui.go` for the surface.
 
+## MCP (AI agents)
+
+The same admin operations are served as an MCP server at `/admin/mcp`, so an
+agent can seed tenants and users or mint tokens without hand-written HTTP calls:
+
+```bash
+claude mcp add --transport http mock-oidc https://oidc.dev.test/admin/mcp
+```
+
+Tools:
+
+- Settings: `settings_get`, `settings_set` (`interactiveLogin`,
+  `rotateRefreshToken`, `entra`, `graph`).
+- Login directory, when one is loaded: `directory_list`,
+  `directory_upsert_user`, `directory_delete_user`, `directory_reset`.
+- Entra, when configured: `entra_get_state`, `entra_create_tenant`,
+  `entra_update_tenant`, `entra_delete_tenant`, `entra_create_user`,
+  `entra_update_user`, `entra_delete_user`, `entra_revoke_consent`,
+  `entra_reset`, `entra_rotate_keys`, `entra_mint_token`.
+
+Edits are in-memory, exactly like the admin UI. The endpoint is Streamable
+HTTP, stateless and JSON-only, and serves both the `2026-07-28` protocol and
+the `initialize`-based `2025-03-26` to `2025-11-25` versions. It has no
+authentication, like `/admin/api/`. It refuses browser requests whose `Origin`
+is neither the server's own host nor a loopback host, and requires
+`Content-Type: application/json`.
+
 ## Consumer configuration
 
 ```env
