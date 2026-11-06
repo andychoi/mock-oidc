@@ -189,14 +189,7 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 		if a.settings == nil {
 			return notFound()
 		}
-		st := a.settings.AdminSettings()
-		return routing.JSON(jsonx.Obj{
-			{Name: "interactiveLogin", V: st.InteractiveLogin},
-			{Name: "rotateRefreshToken", V: st.RotateRefreshToken},
-			{Name: "entraConfigured", V: st.EntraConfigured},
-			{Name: "entraEnabled", V: st.EntraEnabled},
-			{Name: "graphEnabled", V: st.GraphEnabled},
-		})
+		return routing.JSON(settingsObj(a.settings.AdminSettings()))
 	case post && action == "settings":
 		if a.settings == nil {
 			return notFound()
@@ -278,16 +271,7 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 		if a.dir == nil {
 			return notFound()
 		}
-		arr := jsonx.Arr{}
-		for _, u := range a.dir.List() {
-			arr = append(arr, jsonx.Obj{
-				{Name: "username", V: u.Username},
-				{Name: "name", V: u.Name},
-				{Name: "email", V: u.Email},
-				{Name: "groups", V: u.Groups},
-			})
-		}
-		return routing.JSON(arr)
+		return routing.JSON(directoryArr(a.dir))
 	case post && action == "directory/users":
 		return a.upsertDirectoryUser(req)
 	case len(segs) == 3 && segs[0] == "directory" && segs[1] == "users" && del:
@@ -309,6 +293,31 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 		return routing.JSON(a.overview())
 	}
 	return notFound()
+}
+
+// settingsObj renders the live toggles (settings API and settings_get).
+func settingsObj(st AdminSettings) jsonx.Obj {
+	return jsonx.Obj{
+		{Name: "interactiveLogin", V: st.InteractiveLogin},
+		{Name: "rotateRefreshToken", V: st.RotateRefreshToken},
+		{Name: "entraConfigured", V: st.EntraConfigured},
+		{Name: "entraEnabled", V: st.EntraEnabled},
+		{Name: "graphEnabled", V: st.GraphEnabled},
+	}
+}
+
+// directoryArr renders the login directory (directory API and directory_list).
+func directoryArr(dir *directory.Directory) jsonx.Arr {
+	arr := jsonx.Arr{}
+	for _, u := range dir.List() {
+		arr = append(arr, jsonx.Obj{
+			{Name: "username", V: u.Username},
+			{Name: "name", V: u.Name},
+			{Name: "email", V: u.Email},
+			{Name: "groups", V: u.Groups},
+		})
+	}
+	return arr
 }
 
 // deleteError maps store errors: unknown entity → 404, the rest → 400.
