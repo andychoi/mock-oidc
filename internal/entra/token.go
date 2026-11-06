@@ -50,7 +50,7 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	if u.Error == ErrInvalidGrant || !u.Enabled() {
 		return invalidGrant("AADSTS50057: The user account is disabled.")
 	}
-	in := TokenInput{Origin: origin(req), BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
+	in := TokenInput{Origin: IssuerOrigin(req), BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
 		OverageSelfHosted: cfg.OverageSelfHosted(), Tenant: t, User: u, ClientID: c.req.ClientID,
 		Nonce: c.req.Nonce, Scopes: c.req.Scope, Now: h.now(), Expiry: cfg.TokenExpiry,
 		MappedClaims: cfg.MappedClaims(c.req.ClientID, u)}

@@ -79,7 +79,7 @@ func (h *Handler) clientCredentials(req *oauth2.Request, sc scope, cfg *Config) 
 	if app := cfg.App(clientID, sc.Tenant.TID); app != nil {
 		roles = app.Roles
 	}
-	claims := AppOnlyClaims(origin(req), cfg.BasePath, sc.Tenant.TID, clientID, roles, h.now(), cfg.TokenExpiry)
+	claims := AppOnlyClaims(IssuerOrigin(req), cfg.BasePath, sc.Tenant.TID, clientID, roles, h.now(), cfg.TokenExpiry)
 	return routing.JSON(jsonx.Obj{
 		{Name: "token_type", V: "Bearer"},
 		{Name: "expires_in", V: cfg.TokenExpiry},

@@ -86,7 +86,7 @@ func (h *Handler) graphErrorResponse(req *oauth2.Request, e *graphError) routing
 
 // graphBaseURL is the public root of the Graph surface for this request.
 func (c *Config) graphBaseURL(req *oauth2.Request) string {
-	return origin(req) + "/" + c.BasePath + "/" + c.GraphBase()
+	return IssuerOrigin(req) + "/" + c.BasePath + "/" + c.GraphBase()
 }
 
 // graphContext builds an @odata.context URL for a metadata suffix such as
@@ -162,7 +162,7 @@ func (c *Config) nextLink(req *oauth2.Request, nextSkip int) string {
 		}
 	}
 	parts = append(parts, "$skiptoken="+strconv.Itoa(nextSkip))
-	return origin(req) + req.URL.Path + "?" + strings.Join(parts, "&")
+	return IssuerOrigin(req) + req.URL.Path + "?" + strings.Join(parts, "&")
 }
 
 // applySelect narrows an entity to the requested properties. `id` always

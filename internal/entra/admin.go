@@ -1,6 +1,12 @@
 package entra
 
-import "github.com/andychoi/mock-oidc/internal/jsonx"
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/andychoi/mock-oidc/internal/jsonx"
+)
 
 // This file exposes the Entra-mode state and the admin actions the admin UI
 // (internal/adminui) renders. Mutations run through the copy-on-write Store,
@@ -171,3 +177,65 @@ func (h *Handler) AdminResetToSeed() {
 // AdminRotateKeys rotates the signing key set and returns the new kid (same
 // as POST _entra/rotate-keys).
 func (h *Handler) AdminRotateKeys() string { return h.keys.Rotate() }
+
+// MintInput is a token request for a configured account. An empty ClientID
+// means "mock"; an empty Scope (space-separated) means "openid profile email".
+type MintInput struct {
+	TID, Username, ClientID, Scope string
+}
+
+// MintedToken is the token pair AdminMintToken issues.
+type MintedToken struct {
+	TokenType   string
+	ExpiresIn   int64
+	Scope       string
+	AccessToken string
+	IDToken     string
+}
+
+// Obj renders the token response body of POST _entra/mint-token.
+func (t MintedToken) Obj() jsonx.Obj {
+	return jsonx.Obj{
+		{Name: "token_type", V: t.TokenType},
+		{Name: "expires_in", V: t.ExpiresIn},
+		{Name: "scope", V: t.Scope},
+		{Name: "access_token", V: t.AccessToken},
+		{Name: "id_token", V: t.IDToken},
+	}
+}
+
+var errAccountDisabled = errors.New("account is disabled")
+
+// AdminMintToken issues access and ID tokens for a configured, enabled
+// account without the sign-in UI. issuerOrigin is IssuerOrigin(req) of the
+// calling request. An unknown account wraps ErrNotFound; a disabled one
+// wraps errAccountDisabled.
+func (h *Handler) AdminMintToken(issuerOrigin string, in MintInput) (MintedToken, error) {
+	cfg := h.conf()
+	u := cfg.User(in.TID, in.Username)
+	if u == nil {
+		return MintedToken{}, fmt.Errorf("user %s in tenant %s: %w", in.Username, in.TID, ErrNotFound)
+	}
+	if !u.Enabled() {
+		return MintedToken{}, fmt.Errorf("user %s in tenant %s: %w", in.Username, in.TID, errAccountDisabled)
+	}
+	clientID := in.ClientID
+	if clientID == "" {
+		clientID = "mock"
+	}
+	scopes := strings.Fields(in.Scope)
+	if len(scopes) == 0 {
+		scopes = []string{"openid", "profile", "email"}
+	}
+	ti := TokenInput{Origin: issuerOrigin, BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
+		OverageSelfHosted: cfg.OverageSelfHosted(), Tenant: cfg.Tenant(u.TID), User: u,
+		ClientID: clientID, Scopes: scopes, Now: h.now(), Expiry: cfg.TokenExpiry,
+		MappedClaims: cfg.MappedClaims(clientID, u)}
+	return MintedToken{
+		TokenType:   "Bearer",
+		ExpiresIn:   cfg.TokenExpiry,
+		Scope:       strings.Join(scopes, " "),
+		AccessToken: h.keys.Sign(AccessTokenClaims(ti)),
+		IDToken:     h.keys.Sign(IDTokenClaims(ti)),
+	}, nil
+}
