@@ -48,7 +48,7 @@ tool's schema and decoder derive from its Go input struct).
 - No new module dependencies.
 - CI gates: `gofmt -l .` empty (excluding `docs/`), `go vet ./...`, `go build ./...`, `go test ./...`;
   also run `go test -race ./...` before finishing.
-- US English in comments and docs. Commit messages end with `Co-authored by AI`.
+- US English in comments and docs.
 
 ## Commands
 

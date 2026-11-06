@@ -21,6 +21,10 @@
       "command": "agent-browser",
       "args": ["mcp"],
       "env": {}
+    },
+    "mock-oidc": {
+      "type": "http",
+      "url": "https://oidc.dev.test/admin/mcp"
     }
   }
 }
