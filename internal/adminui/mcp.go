@@ -5,9 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"mime"
-	"net"
 	"net/http"
-	"net/url"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -114,9 +112,6 @@ func (a *Handler) serveMCP(req *oauth2.Request) routing.Response {
 		resp.Header.Set("Allow", http.MethodPost)
 		return resp
 	}
-	if !allowedOrigin(req) {
-		return rpcResponse(http.StatusForbidden, nil, nil, &rpcError{code: codeInvalidRequest, message: "Origin not allowed"})
-	}
 	if mt, _, _ := mime.ParseMediaType(req.Header.Get("Content-Type")); mt != "application/json" {
 		return rpcResponse(http.StatusUnsupportedMediaType, nil, nil,
 			&rpcError{code: codeInvalidRequest, message: "Content-Type must be application/json"})
@@ -221,26 +216,6 @@ func checkLegacy(req *oauth2.Request) *rpcError {
 		return nil
 	}
 	return &rpcError{code: codeInvalidRequest, message: "Unsupported MCP-Protocol-Version header: " + v}
-}
-
-// allowedOrigin accepts requests without an Origin (CLI agents send none),
-// from the server's own host[:port] (proxy-aware, so the admin page itself
-// qualifies), and from loopback hosts. Other browser origins are refused.
-func allowedOrigin(req *oauth2.Request) bool {
-	o := req.Header.Get("Origin")
-	if o == "" {
-		return true
-	}
-	u, err := url.Parse(o)
-	if err != nil || u.Host == "" {
-		return false
-	}
-	if host := u.Hostname(); host == "localhost" {
-		return true
-	} else if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return true
-	}
-	return strings.EqualFold(u.Host, req.ProxyAwareURL().Host)
 }
 
 func rpcResponse(status int, id json.RawMessage, result jsonx.Obj, rerr *rpcError) routing.Response {

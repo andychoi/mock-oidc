@@ -198,22 +198,8 @@ func TestMCPTransportGuards(t *testing.T) {
 		t.Errorf("OPTIONS: status %d", resp.StatusCode)
 	}
 
-	for origin, want := range map[string]int{
-		"https://evil.test":       http.StatusForbidden,
-		"http://example.com":      http.StatusOK, // httptest's request host
-		"http://localhost:5173":   http.StatusOK,
-		"http://127.0.0.1:8080":   http.StatusOK,
-		"http://example.com.evil": http.StatusForbidden,
-	} {
-		r := postMCP(t, rt, ping, map[string]string{"Origin": origin})
-		if r.status != want {
-			t.Errorf("Origin %s: status %d, want %d", origin, r.status, want)
-		}
-		if want == http.StatusForbidden {
-			if _, hasID := r.msg["id"]; hasID || r.msg["error"] == nil {
-				t.Errorf("403 body = %s", r.raw)
-			}
-		}
+	if r := postMCP(t, rt, ping, map[string]string{"Origin": "https://evil.test"}); r.status != http.StatusOK {
+		t.Errorf("foreign Origin: status %d %s", r.status, r.raw)
 	}
 
 	if r := postMCP(t, rt, ping, map[string]string{"Content-Type": "text/plain"}); r.status != http.StatusUnsupportedMediaType {

@@ -153,9 +153,8 @@ Tools:
 Edits are in-memory, exactly like the admin UI. The endpoint is Streamable
 HTTP, stateless and JSON-only, and serves both the `2026-07-28` protocol and
 the `initialize`-based `2025-03-26` to `2025-11-25` versions. It has no
-authentication, like `/admin/api/`. It refuses browser requests whose `Origin`
-is neither the server's own host nor a loopback host, and requires
-`Content-Type: application/json`.
+authentication and no `Origin` check, like `/admin/api/`, because the server is
+for development and testing only. Requests need `Content-Type: application/json`.
 
 ## Consumer configuration
 
