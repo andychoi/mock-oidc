@@ -1,131 +1,68 @@
-# Entra Mode — Account Graph API (Design)
+# Entra mode: account Graph API
 
-| | |
-|---|---|
-| Status | Implemented (2026-10-11). Plan: [`03-graph-plan.md`](03-graph-plan.md) |
-| Builds on | [`00-design.md`](00-design.md) (Entra mode), which lists Microsoft Graph as a non-goal. This design lifts that non-goal for the **account-related** surface only |
-| Benchmarked against | [`cmaneu/entra-local`](https://github.com/cmaneu/entra-local) (TypeScript/Fastify + SQLite, ~54k lines), [`nazriel/ms-oidc-mock`](https://github.com/nazriel/ms-oidc-mock) (Rust/axum, ~8.6k lines) |
-| Hard constraints | Opt-in and additive. No new module dependencies. Every existing test passes **unmodified** |
+Entra mode serves a read-only emulation of the account part of Microsoft Graph, OIDC
+`userinfo`, account-selection hints, and app-only tokens. A relying party that signs in with
+Entra usually calls Graph next: `/me` for a profile, `/me/memberOf` for authorization, `/users` to
+sync a directory, and `getMemberObjects` to resolve group overage. This surface lets those calls
+stay inside the test environment.
 
-## 1. Why
+Sign-in and tokens are in [`00-design.md`](00-design.md). Org attributes, dynamic groups,
+`$filter`, and `$expand=manager` are in [`04-org-directory-design.md`](04-org-directory-design.md).
 
-Entra mode emulates sign-in, but a relying party that signs in with Entra almost always then calls
-Microsoft Graph for the account: `/me` to fill a profile, `/me/memberOf` for authorization,
-`/users` to sync a directory. Today mock-oidc issues a Graph-audience access token that nothing can
-consume, and the group-overage claim it emits points at **the real** `graph.microsoft.com`, so a
-test RP that follows it leaves the test environment and fails. The loop does not close.
+## 1. Scope
 
-Both benchmarked projects close it, and both treat a small read-only Graph as the thing that makes
-an Entra mock usable rather than a curiosity.
+Emulated: `/me`, `/users`, `/groups`, group membership, the manager chain, `getMemberObjects`
+and `getMemberGroups`, OIDC `userinfo`, `$top`, `$skiptoken`, `$select`, a `$filter` subset,
+`$expand=manager`, `login_hint`, `domain_hint`, `prompt`, and the `client_credentials` grant.
 
-## 2. Benchmark
+Not emulated: Graph writes, nested groups, Graph permission checks, `$orderby`, `$search`,
+`$count`, and Graph beyond accounts and groups.
 
-### 2.1 What the two projects have that we do not
+## 2. Sources
 
-| Capability | entra-local | ms-oidc-mock | mock-oidc today |
-|---|---|---|---|
-| Graph `/v1.0/me` | yes | yes (as its *userinfo*) | — |
-| Graph `/v1.0/users`, `/users/{id}` | yes, paged | — | — |
-| Graph `/v1.0/groups`, `/groups/{id}/members` | yes, paged | — | — |
-| `memberOf` for a user | yes (`/me/memberOf`, `/users/{id}/memberOf`) | — | — |
-| `getMemberObjects` (resolves group overage) | — | — | — |
-| OIDC `userinfo` | yes (`/graph/oidc/userinfo`) | conflated with `/v1.0/me` | — (deliberately omitted) |
-| Bearer validation of its own access token | yes (JWKS + `iss` + `aud` + `ver:"2.0"`) | yes (token lookup table) | — |
-| OData envelope (`@odata.context`, `value[]`, `@odata.nextLink`) | yes | `@odata.context` only | — |
-| Graph error body (`{error:{code,message}}`) + `WWW-Authenticate` | yes | — | — |
-| Rich account fields (`givenName`, `surname`, `userPrincipalName`, `accountEnabled`, `jobTitle`, …) | yes | yes | only `name`, `email` |
-| `roles` claim from user config | — (app-role registry) | yes | — |
-| App-only token (`client_credentials`) + `roles`, no `oid` | yes | — | rejected (`unsupported_grant_type`) |
-| `scp` as short names (`User.Read`, not the resource URI) | yes | — | echoes raw requested scopes |
-| `login_hint` / `prompt` account preselection | preselect in picker, `prompt=none`/`select_account` | auto-select the hinted account, `ignore_login_hint` toggle | — |
-| Multiple tenants | yes (store has `tenants`) but Graph is not tenant-scoped | single tenant | yes, and Graph must be |
+Two open-source Entra mocks shaped this design.
+[`cmaneu/entra-local`](https://github.com/cmaneu/entra-local) contributed the authorization model
+(any valid Graph-audience token reads, and `/me` needs a delegated token), the OData paging
+rules, Graph error bodies, `userinfo` at `/graph/oidc/userinfo`, and short-name `scp`.
+[`nazriel/ms-oidc-mock`](https://github.com/nazriel/ms-oidc-mock) contributed the `login_hint`
+shortcut with a switch to turn it off, the richer `/me` profile fields, and `roles` read straight
+from the user fixture.
 
-### 2.2 Logic and edge cases worth borrowing verbatim
-
-From **entra-local** (`src/graph/handlers.ts`, `specs/…10-minimal-graph.md`):
-
-1. **Authorization model.** Possession of a valid Graph-audience token is sufficient; no
-   fine-grained `scp`/`roles` enforcement. `/me` additionally requires a **delegated** token (one
-   carrying `oid`) — an app-only token gets `403 Authorization_RequestDenied`. Collections accept
-   either. This is a documented divergence from real Graph (which enforces `User.Read`,
-   `User.Read.All`, `Group.Read.All`) and the right trade-off for a dev tool.
-2. **Accept our own `ver:"2.0"` token.** The validator must not expect Microsoft's v1 Graph token
-   shape; a mock that signs v2 tokens and then rejects them on its own Graph is the obvious trap.
-3. **`@odata.nextLink` preserves every other query parameter** and overrides only `$skiptoken`, so
-   the page size stays stable across continuations. `$`-prefixed keys stay literal; only values are
-   percent-encoded.
-4. **`$top` clamping**: default 100, max 999, non-integer or `< 1` falls back to the default
-   (never an error). `$skiptoken` is an opaque non-negative integer offset; invalid → `0`.
-5. **`nextLink` only when rows remain** — the last page omits it. Collections are ordered by `id`
-   so offset paging is deterministic.
-6. **`/users/{id}` resolves by object id *or* UPN** — real Graph accepts both, and SDK samples use
-   the UPN.
-7. **Single entity carries `@odata.context` with the `$entity` suffix; collection items omit their
-   own context.**
-8. **Graph errors are a different error surface from OAuth**: `{"error":{"code","message"}}`, never
-   the OAuth `{error, error_description}` body, and never an HTML page.
-9. **`userinfo` rejects a user whose account is disabled** (`accountEnabled: false` → `401`), and
-   rejects an app-only token with `403 insufficient_scope`.
-10. **`scp` carries short names** (`User.Read`), with the resource prefix stripped, and
-    `offline_access` excluded — it is a grant scope, not an API permission. The token response's
-    `scope` field still echoes everything.
-11. **Graph delegated scopes are auto-consented and need no registration**, so a client requesting
-    `User.Read` is not rejected as `invalid_scope`.
-
-From **ms-oidc-mock**:
-
-12. **`login_hint` resolves an account and skips the picker**, with a config switch
-    (`ignore_login_hint`) to force the picker anyway — this is what makes headless RP tests possible.
-13. **A richer `/me` payload**: `jobTitle`, `officeLocation`, `businessPhones`, `mobilePhone`,
-    `preferredLanguage` — cheap fixture fields that real Graph consumers read.
-14. **`roles` straight off the user fixture**, with no app-role registry. For a mock this beats
-    entra-local's app-registration machinery.
-
-### 2.3 Borrowed with changes, and declined
-
-| Their choice | Ours | Why |
-|---|---|---|
-| ms-oidc-mock serves the **Graph `/me` shape at `userinfo`** | `userinfo` returns OIDC claims; the Graph shape lives at `/graph/v1.0/me` | Real Entra has both, and they differ. Conflating them teaches an RP the wrong contract |
-| Overage `endpoint` → `graph.microsoft.com` (ours today; neither project emits overage at all) | → **our own** `…/graph/v1.0/users/{oid}/getMemberObjects` when Graph is on | A test RP must be able to follow it. Switchable back via `overageEndpoint: "microsoft"` |
-| entra-local Graph is **not tenant-scoped** (one directory) | every collection is scoped to the **token's `tid`** | We are multi-tenant by design; a Corp token must not enumerate Customer X |
-| entra-local pairwise `sub` = `sha256(userId\|appId\|tenantId)` | keep ours: `sha256(clientID + ":" + oid)` | Already shipped and tested; the tenant is implied by the oid |
-| entra-local app registrations, scopes, secrets, app roles, portal | none | mock-oidc accepts any `client_id`/secret everywhere; an app registry would be a second product |
-| entra-local device code flow, refresh-token redemption, SQLite persistence | none | Not account-related; refresh redemption is already a documented non-goal |
-| entra-local `$select`-less Graph | minimal `$select` | Graph SDKs and the MSAL samples send `$select` on nearly every call; ignoring it silently returns fields the caller did not ask for |
-| entra-local writes via its admin REST API | our admin UI already owns mutation | One mutation surface, already copy-on-write |
+Three choices differ from both. Graph is scoped to the token's tenant, because a Corp token must
+not list Customer X. `userinfo` returns OIDC claims, not the Graph `/me` shape, because real Entra
+has both and they differ. There is no app registry, because mock-oidc accepts any client.
 
 ## 3. Architecture
 
-```
-internal/entra/
-├── graphconfig.go   GraphConfig (the "graph" block), defaults, validation
-├── directory.go     Group entities derived from the config: GroupsIn, GroupByID, MembersOf, GroupsOf
-├── verify.go        KeySet.Verify + ValidateAccessToken (iss/aud/ver/exp/nbf/kid), typed failures
-├── odata.go         OData envelope, $top/$skiptoken paging, $select, Graph error bodies
-├── graph.go         Graph route table and the account handlers
-├── userinfo.go      GET|POST /graph/oidc/userinfo
-└── appcreds.go      client_credentials (app-only) grant, gated by graph.appOnly
-```
+| File in `internal/entra` | Contents |
+|---|---|
+| `graphconfig.go` | `GraphConfig` (the `graph` block), defaults, validation |
+| `graph.go` | Graph route table and handlers |
+| `directory.go` | Users and groups as Graph sees them: `(*Tenant).GroupOID`, `(*User).MemberGroups`, `GroupsIn`, `GroupByID`, `MembersOf`, `GroupsOf`, `ManagerOf`, `DirectReports` |
+| `odata.go` | OData envelope, paging, `$select`, Graph error bodies |
+| `filter.go` | `$filter` parser and evaluator |
+| `verify.go` | `KeySet.Verify` and `ValidateAccessToken` |
+| `userinfo.go` | `GET` and `POST /graph/oidc/userinfo` |
+| `appcreds.go` | The `client_credentials` grant |
+| `authorize.go` | Selection hints |
 
-Mounted under the **existing** front route: `graph` becomes a reserved first segment next to
-`_entra`, so `Handle` dispatches `/{basePath}/graph/...` before tenant resolution. There is no
-ambiguity — tenant segments must be GUIDs, `organizations`, or `common`.
+Graph uses the existing Entra front route. Its segment (`graph` by default) is reserved next to
+`_entra`, so `Handle` sends `/{basePath}/graph/...` to Graph before it resolves a tenant. Tenant
+segments are GUIDs, `organizations`, or `common`, so the two cannot clash. While Graph is off,
+the segment is not reserved and resolves as an unknown tenant.
 
 ```
-/{basePath}/graph/v1.0/...        Graph account endpoints   (tenant comes from the token's tid)
+/{basePath}/graph/v1.0/...        Graph account endpoints (tenant from the token's tid)
 /{basePath}/graph/oidc/userinfo   OIDC UserInfo
 ```
 
-This mirrors real Graph, which is one tenant-agnostic host whose responses are scoped by the
-caller's token — not a per-tenant endpoint family. It also keeps the router contract intact: one
-front route with a `*` pattern, suffix routes untouched.
+Real Graph is one host for every tenant, and the caller's token scopes each response. This
+layout copies that.
 
 ## 4. Configuration
 
-Graph is **on whenever Entra mode is on**. The optional `"graph"` block inside the `entra` block
-only tunes it; `{"graph": {"enabled": false}}` turns it off and restores today's behavior, byte for
-byte. The one sub-feature that stays opt-in is `appOnly` (§8), because the `client_credentials`
-grant has its own contract.
+Graph is on whenever Entra mode is on. The optional `graph` block inside the `entra` block tunes
+it. `appOnly` is the one feature that is off by default (§8).
 
 ```json
 {
@@ -145,6 +82,7 @@ grant has its own contract.
         "groups": [ { "name": "AMS Engineers", "description": "Engineering", "securityEnabled": true } ] }
     ],
     "users": [
+      { "username": "sora", "tid": "11111111-1111-1111-1111-111111111111", "name": "Sora Lee" },
       { "username": "jane", "tid": "11111111-1111-1111-1111-111111111111",
         "name": "Jane Kim", "givenName": "Jane", "surname": "Kim",
         "upn": "jane@corp.example", "email": "jane@corp.example",
@@ -158,69 +96,72 @@ grant has its own contract.
 }
 ```
 
-### New fields
-
 | Field | Default | Effect |
 |---|---|---|
-| `graph.enabled` | `true`, block or no block | `false` disables the whole surface: no routes, no `userinfo_endpoint`, and the overage endpoint reverts to Microsoft's |
-| `graph.basePath` | `graph` | the reserved segment; same charset rule as `entra.basePath` |
-| `graph.overageEndpoint` | `self` | `self` → our `getMemberObjects`; `microsoft` → today's `graph.microsoft.com` URL |
-| `graph.userinfo` | `true` | serve **and advertise** `userinfo_endpoint` in discovery |
-| `graph.appOnly` | `false` | enable the `client_credentials` grant (app-only Graph tokens) |
-| `graph.defaultPageSize` / `maxPageSize` | 100 / 999 | `$top` default and clamp |
-| `graph.clockSkew` | 60 (seconds) | leeway on `exp`/`nbf` when validating a Bearer token. Optional in the JSON, so an explicit `0` means no leeway at all; a negative value is rejected |
-| `tenant.groups[]` | derived | metadata (`description`, `mailNickname`, `securityEnabled`, `mailEnabled`, explicit `oid`) for a group name; names used by a user but not declared are auto-created |
-| `user.givenName`, `surname` | — | `given_name` / `family_name` claims and Graph fields |
-| `user.upn` | `preferred_username` rule | Graph `userPrincipalName`; also overrides `preferred_username` when set |
-| `user.accountEnabled` | `true` | `false` → Graph shows it, `userinfo` 401s, and the token endpoint fails with AADSTS50057 (the ergonomic form of `error: "invalid_grant"`) |
-| `user.jobTitle`, `officeLocation`, `businessPhones`, `mobilePhone`, `preferredLanguage` | — | Graph profile fields |
-| `user.roles` | — | `roles` claim in the ID **and** access token |
-| `user.wids` | — | `wids` claim (tenant-wide directory roles; Global Administrator is `62e90394-69f5-4237-9190-012177145e10`) |
-| `user.manager` | — | a username, object ID or UPN in the same tenant (stored as the username); `/users/{id}/manager` and `/directReports` |
-| `user.department`, `companyName`, `employeeId`, `onPremisesExtensionAttributes`, `tenant.groups[].membershipRule`, `apps[].claims` | — | org directory: see [`04-org-directory-design.md`](04-org-directory-design.md) |
-
-Every one of these is additive: `ParseConfig` rejects unknown fields, so a config written for today
-still parses, and a config using the new fields fails loudly on an old binary.
+| `graph.enabled` | `true` | `false` removes the routes and `userinfo_endpoint`, frees the segment, and points the overage claim at `graph.microsoft.com`. The admin setting `graph` changes it at runtime. |
+| `graph.basePath` | `graph` | The reserved segment. Lowercased. One segment of `[A-Za-z0-9_-]`. It cannot be `_entra`, `organizations`, `common`, a GUID, or the Entra `basePath`. |
+| `graph.overageEndpoint` | `self` | `self` points the overage claim at this server's `getMemberObjects`. `microsoft` points it at `graph.microsoft.com`. |
+| `graph.userinfo` | `true` | Serves and advertises `userinfo_endpoint` |
+| `graph.appOnly` | `false` | Turns on the `client_credentials` grant (§8) |
+| `graph.defaultPageSize`, `maxPageSize` | 100, 999 | `$top` default and clamp. A default above the maximum is clamped down. |
+| `graph.clockSkew` | 60 seconds | Leeway on `exp` and `nbf`. An explicit `0` means none. A negative value is rejected. |
+| `tenant.groups[]` | none | Group metadata: `name`, `description`, `mailNickname`, `mail`, `securityEnabled` (default `true`), `mailEnabled`, `oid`, and `membershipRule`. A configured `oid` must be a GUID, unique in the tenant, and is used in Graph and in `object_id` group claims alike. Group names that users list but nobody declares are created automatically. |
+| `user.givenName`, `surname` | none | `given_name` and `family_name` claims, and Graph fields |
+| `user.upn` | the `preferred_username` rule | Graph `userPrincipalName` and the `userinfo` `preferred_username`. Tokens keep the email-based `preferred_username` ([`00-design.md` §4.1](00-design.md#41-id-token-claims)). |
+| `user.accountEnabled` | `true` | `false` shows in Graph, makes `userinfo` and Graph calls with that user's token answer 401, and fails the token endpoint with AADSTS50057 |
+| `user.jobTitle`, `officeLocation`, `businessPhones`, `mobilePhone`, `preferredLanguage` | none | Graph profile fields |
+| `user.roles` | none | `roles` claim in the ID and access tokens |
+| `user.wids` | none | `wids` claim, tenant-wide directory roles. Global Administrator is `62e90394-69f5-4237-9190-012177145e10`. |
+| `user.manager` | none | A username, object ID, or UPN in the same tenant, stored as the username |
+| `user.department`, `companyName`, `employeeId`, `onPremisesExtensionAttributes`, `apps[].claims` | none | Org directory: [`04-org-directory-design.md`](04-org-directory-design.md) |
 
 ## 5. Endpoints
 
-All under `{origin}/{basePath}/{graph.basePath}`. `{origin}` is the proxy-aware origin, as
-everywhere else in Entra mode. Every endpoint requires `Authorization: Bearer <access_token>`.
+All paths are under `{origin}/{basePath}/{graph.basePath}`, with the proxy-aware origin used
+everywhere in Entra mode. Every endpoint needs `Authorization: Bearer <access_token>`.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/v1.0/me` | the token's user (`microsoft.graph.user` subset) |
-| GET | `/v1.0/me/memberOf` | the user's groups (collection) |
-| GET | `/v1.0/me/transitiveMemberOf` | same as `memberOf` (our groups are flat) |
-| GET | `/v1.0/me/manager` | the user's manager, or 404 `Request_ResourceNotFound` |
-| GET | `/v1.0/me/directReports` | users whose `manager` is this user |
-| POST | `/v1.0/me/getMemberObjects` | `{"value": ["<group oid>", …]}` — **resolves group overage** |
-| POST | `/v1.0/me/getMemberGroups` | same shape, group ids only |
-| GET | `/v1.0/users` | the token tenant's users (collection, paged) |
-| GET | `/v1.0/users/{id\|upn}` | one user |
-| GET | `/v1.0/users/{id}/memberOf`, `/transitiveMemberOf`, `/manager`, `/directReports` | as for `/me` |
-| POST | `/v1.0/users/{id}/getMemberObjects`, `/getMemberGroups` | as for `/me` |
-| GET | `/v1.0/groups` | the token tenant's groups (collection, paged) |
-| GET | `/v1.0/groups/{id}` | one group |
-| GET | `/v1.0/groups/{id}/members` | the group's member users |
-| GET | `/v1.0/me/photo`, `/me/photo/$value` | 404 `ImageNotFound` (clients probe it) |
-| GET/POST | `/oidc/userinfo` | OIDC claims (§5.3) |
+| GET | `/v1.0/me` | The token's user (`microsoft.graph.user` subset) |
+| GET | `/v1.0/me/memberOf`, `/transitiveMemberOf` | The user's groups. Groups are flat, so both are the same. |
+| GET | `/v1.0/me/manager` | The user's manager, or 404 `Request_ResourceNotFound` |
+| GET | `/v1.0/me/directReports` | Users whose `manager` is this user |
+| POST | `/v1.0/me/getMemberObjects`, `/getMemberGroups` | Group object IDs (§5.2). This resolves group overage. |
+| GET | `/v1.0/users` | The token tenant's users, paged |
+| GET | `/v1.0/users/{id}` | One user by object ID, UPN, or username |
+| GET, POST | `/v1.0/users/{id}/…` | The same sub-paths as `/me` |
+| GET | `/v1.0/groups` | The token tenant's groups, paged |
+| GET | `/v1.0/groups/{id}` | One group by object ID or display name |
+| GET | `/v1.0/groups/{id}/members`, `/transitiveMembers` | The group's member users |
+| GET | `/v1.0/me/photo`, `/me/photo/$value` | 404 `ImageNotFound`, because clients probe it |
+| GET, POST | `/oidc/userinfo` | OIDC claims (§5.3) |
 | OPTIONS | any | 204 |
-| any | anything else under the Graph base | 404 `Request_ResourceNotFound`, Graph error body |
+
+Any other path under `/v1.0/` checks the token first, then answers 404
+`Request_ResourceNotFound` with a Graph error body. `/oidc/userinfo` with another method gets 405.
 
 ### 5.1 Bearer validation
 
-In order: a `Bearer` scheme and a non-empty token; three JWS parts; `kid` present in the **current**
-`KeySet` (so a token signed before a rotation still verifies while its key is published); RS256
-signature; `aud` == `00000003-0000-0000-c000-000000000000`; `ver` == `"2.0"`; `iss` ==
-`Issuer(origin, basePath, claims.tid)` for the token's own `tid` (so the proxy-aware origin matches
-and a token minted for another host is rejected); `nbf` ≤ now and now < `exp`, each with
-`clockSkew`. Any failure → `401 InvalidAuthenticationToken` with
-`WWW-Authenticate: Bearer error="invalid_token"`.
+`ValidateAccessToken` checks, in order:
 
-Then the token's `tid` must still name a configured tenant, and (for a delegated token) `oid` must
-still resolve to a user in it — a runtime admin delete between mint and call gives `401`, matching
-entra-local's "the user could not be found".
+1. A `Bearer` scheme and a non-empty token with three JWS parts.
+2. `alg` is `RS256`, and `kid` names a key in the current `KeySet`. A token signed before a
+   rotation still verifies while its key stays published.
+3. The RS256 signature.
+4. `aud` is `00000003-0000-0000-c000-000000000000`, `ver` is `"2.0"`, and `appid` is not empty.
+   Every access token and app-only token carries `appid` and no ID token does, so ID tokens fail
+   here. A claims mapping cannot add `appid`.
+5. `tid` is not empty, and `iss` is `Issuer(origin, basePath, tid)`. A token minted for another
+   host fails.
+6. `exp` is present and in the future, and `nbf`, when present, is in the past, each with
+   `clockSkew`.
+7. `tid` names a configured tenant.
+8. For a delegated token (one with `oid`), `oid` names a user in that tenant whose account is
+   enabled. Deleting or disabling the user after minting invalidates the token.
+
+Every failure gets the same `401 InvalidAuthenticationToken` "Access token is empty or invalid."
+with `WWW-Authenticate: Bearer error="invalid_token"`, so a caller cannot probe the directory
+through the message.
 
 ### 5.2 Shapes
 
@@ -230,19 +171,24 @@ entra-local's "the user could not be found".
   "id": "<oid>", "displayName": "Jane Kim", "userPrincipalName": "jane@corp.example",
   "mail": "jane@corp.example", "givenName": "Jane", "surname": "Kim",
   "jobTitle": "Staff Engineer", "officeLocation": "Seoul",
-  "businessPhones": ["+82-2-555-0100"], "mobilePhone": null,
+  "businessPhones": ["+82-2-555-0100"], "mobilePhone": "+82-10-555-0101",
   "preferredLanguage": "en-US", "accountEnabled": true }
 
 // group
 { "@odata.context": "{origin}/{base}/graph/v1.0/$metadata#groups/$entity",
-  "id": "<group oid>", "displayName": "AMS Engineers", "description": null,
+  "id": "<group oid>", "displayName": "AMS Engineers", "description": "Engineering",
   "mailNickname": "amsengineers", "mail": null,
-  "mailEnabled": false, "securityEnabled": true }
+  "mailEnabled": false, "securityEnabled": true,
+  "groupTypes": [], "membershipRule": null, "membershipRuleProcessingState": null }
 
 // collection
 { "@odata.context": "{origin}/{base}/graph/v1.0/$metadata#users",
   "value": [ /* entities without their own @odata.context */ ],
   "@odata.nextLink": "{origin}/{base}/graph/v1.0/users?$top=1&$skiptoken=1" }
+
+// getMemberObjects, getMemberGroups
+{ "@odata.context": "{origin}/{base}/graph/v1.0/$metadata#Collection(Edm.String)",
+  "value": [ "<group oid>", … ] }
 
 // error
 { "error": { "code": "InvalidAuthenticationToken",
@@ -251,93 +197,109 @@ entra-local's "the user could not be found".
                              "client-request-id": "<uuid>" } } }
 ```
 
-Missing values are `null` for single-valued fields and `[]` for `businessPhones` — Graph emits the
-key rather than omitting it, and SDK deserializers rely on that. Graph error codes are PascalCase,
-so these bodies must **not** go through `routing.ErrorResponse` (which lowercases the whole body for
-navikt compatibility); `internal/entra` renders them directly.
-
-`memberOf` collections use the `directoryObjects` context suffix, like real Graph.
+- A missing single value is `null`, and a missing `businessPhones` is `[]`. Graph emits the key,
+  and SDK deserializers rely on it.
+- `memberOf`, `directReports`, and `members` collections use the `directoryObjects` context
+  suffix, like real Graph.
+- `getMemberObjects` and `getMemberGroups` ignore `securityEnabledOnly`. A body that is not JSON
+  gets 400 `Request_BadRequest`.
+- Group IDs come from `(*Tenant).GroupOID`, so a group's configured `oid` is the same in Graph,
+  in `object_id` group claims, and in `/_entra/groups`. Memberships come from
+  `User.MemberGroups()`, with static and dynamic groups and no duplicates.
+- `innerError.client-request-id` echoes the request's `client-request-id` header.
+- Graph error codes are PascalCase, so these bodies never go through `routing.ErrorResponse`,
+  which lowercases bodies for navikt compatibility.
 
 ### 5.3 UserInfo
 
-`GET|POST /{base}/{graph.basePath}/oidc/userinfo` → OIDC claims, not the Graph shape:
-`sub` (the token's pairwise sub), `oid`, `tid`, `name`, `preferred_username`, and `given_name`,
-`family_name`, `email` when set. `Cache-Control: no-store`. An app-only token → `403
-insufficient_scope`; anything else invalid → `401 invalid_token` with `WWW-Authenticate` — RFC 6750
-style with a matching JSON body, as in entra-local. Advertised as `userinfo_endpoint` in discovery
-while `graph.userinfo` is on — which it is by default, so discovery gains a field it does not have
-today. This is the one existing assertion the feature changes (see §9).
+`GET` or `POST /{base}/{graph.basePath}/oidc/userinfo` returns OIDC claims, not the Graph shape:
+`sub` (the token's pairwise `sub`), `oid`, `tid`, `name`, `preferred_username` (the UPN when set),
+and `given_name`, `family_name`, and `email` when set. Responses carry `Cache-Control: no-store`.
+An app-only token gets `403 insufficient_scope`. Any token that fails §5.1, including an ID token,
+gets `401 invalid_token` with `WWW-Authenticate` and the description "The access token is
+invalid or expired." Discovery advertises the endpoint as `userinfo_endpoint` while
+`graph.userinfo` is on.
 
 ### 5.4 Query options
 
 | Option | Behavior |
 |---|---|
-| `$top` | default `defaultPageSize`, clamped to `[1, maxPageSize]`; invalid → default |
-| `$skiptoken` | non-negative integer offset; invalid → `0` |
-| `$select` | comma list of known fields; `id` is always included; an unknown property → `400 Request_UnsupportedQuery` with Graph's "Could not find a property named …" message. Without `$select`, `$select`-only properties (the org attributes) are omitted, as in Graph |
-| `$filter` | a subset (`eq`, `ne`, `in`, `startsWith`, `any`, `and`/`or`/`not`) on collections — see [`04-org-directory-design.md`](04-org-directory-design.md) §5; anything else → `400 Request_UnsupportedQuery` |
-| `$expand` | `manager` only, on `/me`, `/users/{id}` and `/users` (§6 of the org design); anything else → `400 Request_UnsupportedQuery` |
-| `$orderby`, `$search`, `$count` | `400 Request_UnsupportedQuery` — an explicit refusal beats silently returning a wrong answer |
+| `$top` | Default `defaultPageSize`, clamped to `[1, maxPageSize]`. An invalid value uses the default. |
+| `$skiptoken` | A non-negative integer offset. An invalid value is `0`. `@odata.nextLink` keeps every other parameter and appears only while rows remain. Collections are ordered by `id`. |
+| `$select` | A comma list of known properties. `id` is always included. The server checks the list before filtering and paging, so an unknown property gets `400 Request_UnsupportedQuery` "Could not find a property named …" even on an empty page. Without `$select`, the `$select`-only org properties are left out, as in Graph. |
+| `$filter` | Collections only. A subset of `eq`, `ne`, `in`, `startsWith`, `any`, `and`, `or`, and `not`, nested at most 32 levels; see [`04-org-directory-design.md` §5](04-org-directory-design.md#5-filter-collections-only) |
+| `$expand` | `manager` only, on `/me`, `/users/{id}`, and `/users`; see [`04-org-directory-design.md` §6](04-org-directory-design.md#6-expandmanager) |
+| `$orderby`, `$search`, `$count`, `$apply`, `$format` | `400 Request_UnsupportedQuery` "The query option '…' is not supported by this emulator." |
+
+Every refused option, every `$filter` failure, and `$filter` on a single entity get
+`400 Request_UnsupportedQuery`. The emulator never ignores an option it does not support.
 
 ## 6. Token changes
 
-These apply to Entra mode only (already opt-in):
+These change Entra tokens whether Graph is on or off, except the overage endpoint:
 
-1. **Group overage resolves locally.** `_claim_sources.src1.endpoint` becomes
-   `{origin}/{base}/graph/v1.0/users/{oid}/getMemberObjects`. With Graph disabled, or
-   `overageEndpoint: "microsoft"`, it stays the real Graph URL. (`TestGroupOverageBoundary` asserts
-   the endpoint only with `strings.Contains(ep, "/users/oid-b/getMemberObjects")`, which both forms
-   satisfy, so it stays green unmodified.)
-2. **`scp` carries short names** with the resource prefix stripped
-   (`https://graph.microsoft.com/User.Read` → `User.Read`) and `offline_access` dropped. The token
-   response's `scope` field is unchanged.
-3. **`azp` and `appid`** are added to the access token (both the `client_id`), as real Entra emits
-   and as entra-local assembles.
-4. **`given_name` / `family_name` / `roles` / `wids`** appear when the user configures them.
-5. **`accountEnabled: false`** fails the token endpoint with AADSTS50057, the same as
+1. `scp` carries short names with the resource prefix stripped
+   (`https://graph.microsoft.com/User.Read` becomes `User.Read`) and without `offline_access`.
+   The token response's `scope` field keeps every requested scope.
+2. The access token carries `azp` and `appid`, both set to the `client_id`.
+3. `given_name`, `family_name`, `roles`, and `wids` appear when the user sets them.
+4. `accountEnabled: false` fails the token endpoint with AADSTS50057, the same as
    `error: "invalid_grant"`.
+5. The group-overage endpoint points at this server's
+   `{origin}/{base}/graph/v1.0/users/{oid}/getMemberObjects` while Graph is on and
+   `overageEndpoint` is `self`. Otherwise it is the real Graph URL.
 
 ## 7. Account selection hints
 
-Borrowed from both projects, because without them every RP test needs a browser:
+Without these, every relying-party test needs a browser.
 
-- **`login_hint`** matching exactly one account in scope (by UPN, email, or username) issues the
-  code immediately, skipping the picker. `prompt=select_account|login` forces the picker anyway, and
-  `graph`-independent config `ignoreLoginHint: true` disables the shortcut entirely. A hint that
-  matches nothing or several accounts falls back to the picker with the hint pre-filled and the
-  matching account highlighted (entra-local).
-- **`domain_hint`** on `organizations`/`common` narrows the picker to tenants carrying that domain;
-  if exactly one account remains the shortcut applies.
-- **`prompt=none`** issues the code when `login_hint` resolves one account, else redirects
-  `error=interaction_required` "AADSTS50058: A silent sign-in request was sent but no user is signed
-  in." *Divergence:* we have no session cookie, so a resolvable `login_hint` **is** the session.
+- `login_hint` that matches exactly one account in scope, by UPN, email, or username, issues the
+  code on the GET and skips the picker and the passkey step. `prompt=select_account` and
+  `prompt=login` show the picker anyway. `"ignoreLoginHint": true` in the `entra` block turns the
+  shortcut off. A hint that matches no account or several shows the picker with the hint named and
+  any matching account marked.
+- `domain_hint` on `organizations` or `common` narrows the picker to tenants that list that
+  domain. A domain that matches no tenant is ignored. It has no effect on tenant paths, and on its
+  own it never skips the picker.
+- `prompt=none` issues the code when `login_hint` resolves one account and `ignoreLoginHint` is
+  off. Otherwise it redirects with `error=interaction_required` "AADSTS50058: A silent sign-in
+  request was sent but no user is signed in." This is a divergence from real Entra: the mock keeps
+  no session cookie, so a resolvable `login_hint` stands in for the session.
 
 ## 8. App-only tokens
 
-Gated by `graph.appOnly`, default off. Keeping it opt-in is a real design position, not test
-convenience: `client_credentials` changes who can get a token at all, and most RP tests want it
-rejected. It also leaves `TestEntraUnsupportedGrantIsEntraError` green unmodified. When on, `grant_type=client_credentials` with
-`scope=https://graph.microsoft.com/.default` on a **tenant-specific** path mints an access token
-with `tid` from the path, `sub` = `azp` = `appid` = `client_id`, `roles` from
-`entra.apps[].roles`, and no `oid`/`scp`. On `organizations`/`common` it is a 400 `invalid_request`
-(real Entra's exact code there is unverified — see §10). Such a token reads `/users` and `/groups`
-and gets `403 Authorization_RequestDenied` on `/me`, exactly as in entra-local.
+`graph.appOnly` turns this on, and it needs Graph on too. It is off by default because
+`client_credentials` changes who can get a token at all, and most relying-party tests want it
+refused. While it is off, the grant gets 400 `unsupported_grant_type` "AADSTS70003".
+
+When on, `grant_type=client_credentials` on a tenant-specific path mints an access token:
+
+- `client_id` comes from the form or from Basic auth. Without it, 400 `invalid_client`
+  "AADSTS900023".
+- Each requested scope must end in `/.default` or be `.default`. No scope also works. Any other
+  scope gets 400 `invalid_request` "AADSTS1002012". The token's `aud` is always Graph.
+- The token has `tid` from the path, `sub`, `azp`, and `appid` set to the `client_id`, `roles` from
+  the matching `entra.apps[]` entry, and no `oid` or `scp`. The response has `token_type`,
+  `expires_in`, `ext_expires_in`, and `access_token`, with no `scope`.
+- On `organizations` or `common` the grant gets 400 `invalid_request`, because no tenant is named.
+
+An app-only token reads `/users` and `/groups` and gets `403 Authorization_RequestDenied` on
+`/me`, like a directory-sync job.
 
 ## 9. Decisions
 
 | Decision | Why |
 |---|---|
-| Graph is **on by default** with Entra mode, switchable off via `{"graph": {"enabled": false}}` | An Entra mock whose Graph you must remember to enable is an Entra mock whose Graph nobody uses. The cost is one existing assertion: `TestEntraDiscoveryPerTenant`'s `userinfo_endpoint must be absent`, which encoded the old decision that we had nowhere to point it. Updating that line is a sanctioned exception to "never edit existing tests", agreed when this design was reviewed — it is a decision being revised, not a test bent to fit new code. Nothing else needed changing: the overage assertion is a `strings.Contains` that both URL forms satisfy, and `appOnly` stays opt-in |
-| One tenant-agnostic `/graph/` base, scoped by the token's `tid` | Mirrors real Graph, and keeps the single front route |
-| Read-only | The admin UI already owns mutation, with copy-on-write and re-validation. Two write paths would be two sources of truth |
-| Group entities derived from user `groups[]`, ids from the existing `GroupObjectID` | No config break, and the ids already in `object_id` group claims and `/_entra/groups` are the same ids Graph returns — an RP can match a claim to a Graph object |
-| Flat groups: `transitiveMemberOf` == `memberOf` | Nested groups are a directory feature, not an account feature. Documented |
-| No Graph permission enforcement | Follows entra-local; mock-oidc accepts any client everywhere, so enforcing `User.Read.All` would be theater |
-| Graph errors bypass `routing.ErrorResponse` | Graph codes are PascalCase; the lowercasing is a navikt behavior that must not leak into a Graph body |
+| Graph is on by default with Entra mode | An Entra mock whose Graph must be turned on is one whose Graph nobody uses. Before Graph existed, discovery had no `userinfo_endpoint` because there was nowhere to point it. Now it has one. |
+| One tenant-agnostic `/graph/` base, scoped by the token's `tid` | Real Graph works this way, and it keeps the single front route |
+| Read-only | The admin UI already owns edits, with copy-on-write and validation. Two write paths would be two sources of truth. |
+| Group IDs from `(*Tenant).GroupOID` | The ID in an `object_id` group claim is the ID Graph returns, so a relying party can match a claim to a Graph object |
+| Flat groups: `transitiveMemberOf` equals `memberOf` | Nested groups are a directory feature, not an account feature |
+| No Graph permission checks | mock-oidc accepts any client everywhere, so checking `User.Read.All` would prove nothing |
+| Graph errors bypass `routing.ErrorResponse` | Graph codes are PascalCase, and the lowercasing is navikt behavior |
 
 ## 10. What still needs real Entra
 
-The exact `AADSTS` code for `client_credentials` against `/common`; whether a real v2 ID token
-carries `wids` for a non-admin; real Graph's exact `innerError` field set; whether real Graph 400s or
-ignores an unknown `$orderby`. Each is a fixture to confirm against a real tenant in the IAM's
-pre-launch smoke test, then fold back here.
+Open questions to check against a real tenant: the exact `AADSTS` code for `client_credentials`
+on `/common`, whether a real v2 ID token carries `wids` for a non-admin, the exact `innerError`
+fields, and whether real Graph refuses or ignores an unsupported `$orderby`.
