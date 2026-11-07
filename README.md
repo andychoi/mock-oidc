@@ -356,6 +356,10 @@ seed scripts, not in the IdP.
 
 - **ams** (E14 OIDC SSO)
 - **iam** (Entra mode)
+- **ai-docs** (DocHub + Gitea OIDC auth source)
+- **flow-spec** (token verification middleware)
+- **signflow** (dev OIDC via `dev.sh`)
+- **ai-dev-platform-feature-aws** (CoderHub login)
 
 ## Development
 
