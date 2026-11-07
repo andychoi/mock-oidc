@@ -1,6 +1,9 @@
 package entra
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -54,5 +57,49 @@ func TestRedeemAfterAccountRemovedIsInvalidGrant(t *testing.T) {
 				t.Fatalf("redeem = %d %s, want 400 invalid_grant", resp.Status, resp.Body)
 			}
 		})
+	}
+}
+
+// jwtClaims decodes a JWS payload without verifying it.
+func jwtClaims(t *testing.T, jwt string) map[string]any {
+	t.Helper()
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a JWS: %q", jwt)
+	}
+	b, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// A configured group oid is the group's identity everywhere: the groups
+// claim, Graph overage resolution and the test API.
+func TestConfiguredGroupOIDAgreesAcrossClaimAndGraph(t *testing.T) {
+	const adminsOID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	h := New(mustConfig(t, `{
+	  "tenants": [{"tid": "`+tidOne+`", "groupClaimFormat": "object_id",
+	               "groups": [{"name": "Admins", "oid": "`+adminsOID+`"}]}],
+	  "users": [{"username": "jane", "tid": "`+tidOne+`", "groups": ["Admins"]}]
+	}`))
+	tok, err := h.AdminMintToken("http://mock.test", MintInput{TID: tidOne, Username: "jane"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(jwtClaims(t, tok.IDToken)["groups"]); got != "["+adminsOID+"]" {
+		t.Errorf("id_token groups = %s, want [%s]", got, adminsOID)
+	}
+	resp := callGraph(t, h, http.MethodPost, "/v1.0/me/getMemberObjects", tok.AccessToken, `{"securityEnabledOnly": false}`)
+	if got := fmt.Sprint(decodeBody(t, resp)["value"]); got != "["+adminsOID+"]" {
+		t.Errorf("getMemberObjects = %d %s", resp.Status, resp.Body)
+	}
+	resp = serve(h, http.MethodGet, "http://mock.test/entra/_entra/groups?tid="+tidOne, "")
+	if got := decodeBody(t, resp)["Admins"]; got != adminsOID {
+		t.Errorf("_entra/groups Admins = %v, want %s", got, adminsOID)
 	}
 }
