@@ -220,8 +220,19 @@ func lexRule(src string) ([]ruleTok, error) {
 }
 
 type ruleParser struct {
-	toks []ruleTok
-	pos  int
+	toks  []ruleTok
+	pos   int
+	depth int
+}
+
+// nest runs parse one nesting level deeper (see maxNesting).
+func (p *ruleParser) nest(parse func() (rule, error)) (rule, error) {
+	if p.depth == maxNesting {
+		return nil, errors.New("rule nested too deeply")
+	}
+	p.depth++
+	defer func() { p.depth-- }()
+	return parse()
 }
 
 func (p *ruleParser) done() bool { return p.pos >= len(p.toks) }
@@ -290,14 +301,14 @@ func (p *ruleParser) and() (rule, error) {
 
 func (p *ruleParser) unary() (rule, error) {
 	if p.keyword("-not") {
-		inner, err := p.unary()
+		inner, err := p.nest(p.unary)
 		if err != nil {
 			return nil, err
 		}
 		return notRule{inner}, nil
 	}
 	if p.punct("(") {
-		inner, err := p.or()
+		inner, err := p.nest(p.or)
 		if err != nil {
 			return nil, err
 		}
