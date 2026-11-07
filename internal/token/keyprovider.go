@@ -58,9 +58,9 @@ type SigningKey struct {
 // deterministic initial keys consumed from an ordered pool and rebuilt with
 // kid = issuerId, fresh generated keys once the pool is empty.
 type KeyProvider struct {
-	mu      sync.Mutex
+	mu      sync.Mutex // guards initial and keys together
 	initial []*SigningKey
-	keys    sync.Map // issuerID -> *SigningKey
+	keys    map[string]*SigningKey
 	alg     string
 	family  string
 }
@@ -118,27 +118,26 @@ func (p *KeyProvider) Algorithm() string { return p.alg }
 
 // SigningKey returns the (lazily created) signing key for an issuer.
 func (p *KeyProvider) SigningKey(issuerID string) *SigningKey {
-	if v, ok := p.keys.Load(issuerID); ok {
-		return v.(*SigningKey)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if key, ok := p.keys[issuerID]; ok {
+		return key
 	}
 	key := p.keyFromPoolOrNew(issuerID)
-	actual, _ := p.keys.LoadOrStore(issuerID, key)
-	return actual.(*SigningKey)
+	if p.keys == nil {
+		p.keys = map[string]*SigningKey{}
+	}
+	p.keys[issuerID] = key
+	return key
 }
 
 func (p *KeyProvider) keyFromPoolOrNew(issuerID string) *SigningKey {
-	p.mu.Lock()
-	var pooled *SigningKey
-	if len(p.initial) > 0 {
-		pooled = p.initial[0]
-		p.initial = p.initial[1:]
+	if len(p.initial) == 0 {
+		return generateKey(issuerID, p.alg, p.family)
 	}
-	p.mu.Unlock()
-
-	if pooled != nil {
-		return &SigningKey{Kty: pooled.Kty, Kid: issuerID, Alg: p.alg, Use: "sig", RSA: pooled.RSA, EC: pooled.EC}
-	}
-	return generateKey(issuerID, p.alg, p.family)
+	pooled := p.initial[0]
+	p.initial = p.initial[1:]
+	return &SigningKey{Kty: pooled.Kty, Kid: issuerID, Alg: p.alg, Use: "sig", RSA: pooled.RSA, EC: pooled.EC}
 }
 
 func generateKey(issuerID, alg, family string) *SigningKey {
