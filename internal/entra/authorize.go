@@ -279,13 +279,14 @@ func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response 
 	if rm := ar.ResponseMode; rm != "" && rm != "query" {
 		return unsupportedResponseMode(rm)
 	}
-	_, u, oerr := h.postedUser(req, sc)
+	cfg := h.conf()
+	_, u, oerr := h.postedUser(req, sc, cfg)
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
 	}
 	switch req.FormParam("action") {
 	case actionPasskeyApprove:
-		return h.issueCode(req, ar, sc, h.conf(), u)
+		return h.issueCode(req, ar, sc, cfg, u)
 	case actionPasskeyDeny:
 		return errorRedirect(ar.RedirectURI, ar.State, "access_denied", passkeyDenied)
 	}
@@ -295,7 +296,7 @@ func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response 
 		return renderPasskey(passkeyPage{Action: req.URL.RequestURI(), TID: u.TID,
 			Username: u.Username, Name: u.Name, Email: u.Email})
 	}
-	return h.issueCode(req, ar, sc, h.conf(), u)
+	return h.issueCode(req, ar, sc, cfg, u)
 }
 
 // issueCode applies the per-account checks and mints an authorization code.
@@ -327,8 +328,7 @@ func (h *Handler) issueCode(req *oauth2.Request, ar *oauth2.AuthRequest, sc scop
 
 // postedUser resolves the account chosen on the picker (form fields tid and
 // username) within the request scope. Shared with admin consent.
-func (h *Handler) postedUser(req *oauth2.Request, sc scope) (*Tenant, *User, *oauth2.Error) {
-	cfg := h.conf()
+func (h *Handler) postedUser(req *oauth2.Request, sc scope, cfg *Config) (*Tenant, *User, *oauth2.Error) {
 	u := cfg.User(req.FormParam("tid"), req.FormParam("username"))
 	if u == nil {
 		return nil, nil, oauth2.InvalidRequest("AADSTS50034: The user account does not exist in this directory.")

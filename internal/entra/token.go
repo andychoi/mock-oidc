@@ -46,6 +46,9 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	cfg := h.conf()
 	t := cfg.Tenant(c.tid)
 	u := cfg.User(c.tid, c.username)
+	if t == nil || u == nil {
+		return invalidGrant("AADSTS50034: The user account does not exist in this directory.")
+	}
 	// accountEnabled: false is the ergonomic spelling of error: "invalid_grant".
 	if u.Error == ErrInvalidGrant || !u.Enabled() {
 		return invalidGrant("AADSTS50057: The user account is disabled.")
