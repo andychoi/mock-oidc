@@ -551,9 +551,10 @@
       if (u.accountEnabled === false) nameTd.appendChild(chip('chip-attention', 'disabled'));
       const upnTd = add(tr, el('td', null, u.upn || u.email || '—'));
       if (u.manager) upnTd.title = 'manager: ' + u.manager;
-      const dyn = u.dynamicGroups || [];
-      const gTd = add(tr, el('td', 'num', String((u.groups || []).length + dyn.length)));
-      gTd.title = (u.groups || []).concat(dyn.map((g) => g + ' (dynamic)')).join('\n');
+      const statics = new Set((u.groups || []).filter(Boolean));
+      const dyn = (u.dynamicGroups || []).filter((g) => !statics.has(g));
+      const gTd = add(tr, el('td', 'num', String(statics.size + dyn.length)));
+      gTd.title = [...statics].concat(dyn.map((g) => g + ' (dynamic)')).join('\n');
       const amrTd = add(tr, el('td'));
       for (const a of u.amr || []) amrTd.appendChild(chip('chip-done', a));
       if (!(u.amr || []).length) add(amrTd, el('span', 'dim', '—'));
