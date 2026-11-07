@@ -29,8 +29,8 @@ services:
   mock-oidc:
     build: .
     ports:
-      - "443:8080"
-      - "8088:8080"
+      - "127.0.0.1:443:8080"
+      - "127.0.0.1:8088:8080"
     volumes:
       - ./mock-oidc.json:/config/mock-oidc.json:ro
       - ./mock-oidc-login.html:/config/mock-oidc-login.html:ro
