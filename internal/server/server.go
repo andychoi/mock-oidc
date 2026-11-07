@@ -65,7 +65,8 @@ type Server struct {
 // Option configures a Server at construction.
 type Option func(*Server)
 
-// WithOwnBase sets the lazy resolver for the server's own bound base URL.
+// WithOwnBase sets the lazy resolver for the server's own bound base URL; it
+// must already map wildcard binds to loopback.
 func WithOwnBase(fn func() string) Option { return func(s *Server) { s.ownBase = fn } }
 
 // WithTrustPool sets the server's own TLS trust pool (self or keystore cert).
@@ -186,7 +187,7 @@ func (s *Server) buildRouter() *routing.Router {
 	})
 
 	if s.ownBase != nil {
-		debugger.New(s.ownURL, s.trustPool).Register(rt)
+		debugger.New(s.ownBase, s.trustPool).Register(rt)
 	}
 	if s.config.Entra != nil {
 		eh := entra.New(s.config.Entra)
@@ -255,28 +256,6 @@ func (s *Server) AdminSetSetting(name string, value bool) error {
 }
 
 var errEntraNotConfigured = errors.New("entra mode is not configured for this server")
-
-// SetOwnBase replaces the own-base resolver; call before serving starts.
-func (s *Server) SetOwnBase(fn func() string) { s.ownBase = fn }
-
-// ownURL resolves the server's own URL for a path, switching wildcard binds to
-// loopback so the debugger's exchange is connectable.
-func (s *Server) ownURL(path string) string {
-	base := s.ownBase()
-	u, err := url.Parse(base)
-	if err != nil {
-		return base + path
-	}
-	host := u.Hostname()
-	if host == "0.0.0.0" || host == "::" || host == "" {
-		if u.Port() != "" {
-			u.Host = "localhost:" + u.Port()
-		} else {
-			u.Host = "localhost"
-		}
-	}
-	return u.String() + path
-}
 
 func (s *Server) wellKnown(req *oauth2.Request) routing.Response {
 	doc := jsonx.Obj{

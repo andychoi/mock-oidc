@@ -23,28 +23,28 @@ var (
 	errorTmpl    = template.Must(template.ParseFS(templateFS, "templates/error.html.tmpl"))
 )
 
-// OwnURL resolves the server's own bound URL for a path (httpServer.url(path)):
-// the base the server actually listens on, switched to loopback for wildcard
-// binds, so the debugger's token exchange never targets a client-controlled
-// host.
-type OwnURL func(path string) string
+// OwnBase resolves the server's own bound base URL (httpServer.url): the
+// address the server actually listens on, with wildcard binds already switched
+// to loopback, so the debugger's token exchange never targets a
+// client-controlled host.
+type OwnBase func() string
 
 // Handler serves /debugger and /debugger/callback.
 type Handler struct {
 	sessions *sessionManager
-	ownURL   OwnURL
+	ownBase  OwnBase
 	client   *http.Client
 }
 
 // New builds the debugger handler. trustPool is the server's own TLS
 // certificate pool (nil for plain HTTP), so the internal token exchange trusts
 // exactly the server's own certificate.
-func New(ownURL OwnURL, trustPool *x509.CertPool) *Handler {
+func New(ownBase OwnBase, trustPool *x509.CertPool) *Handler {
 	client := &http.Client{}
 	if trustPool != nil {
 		client.Transport = &http.Transport{TLSClientConfig: tlsConfigFor(trustPool)}
 	}
-	return &Handler{sessions: newSessionManager(), ownURL: ownURL, client: client}
+	return &Handler{sessions: newSessionManager(), ownBase: ownBase, client: client}
 }
 
 // Register wires the routes into the router. Handlers catch their own errors
@@ -173,7 +173,7 @@ func (h *Handler) callback(req *oauth2.Request) routing.Response {
 	session := h.sessions.session(req)
 
 	tokenEndpointURL := req.EndpointURL(oauth2.Token)
-	targetURL := h.ownURL(tokenEndpointPath(req.IssuerID()))
+	targetURL := h.ownBase() + tokenEndpointPath(req.IssuerID())
 
 	code := req.QueryParam("code")
 	if code == "" {
