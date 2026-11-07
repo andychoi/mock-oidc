@@ -146,8 +146,18 @@ accepted, see §3.2), `subject_types_supported` `["pairwise"]`,
 | 2 | For a `/{tid}` route, posted `tid` equals the route tenant | else 400 `invalid_request` "AADSTS50020: …" |
 | 3 | User `error` = `interaction_required` | redirect `error=interaction_required` "AADSTS50076: …" |
 | 4 | User `error` = `access_denied` | redirect `error=access_denied` "AADSTS50105: …" |
+| 4a | Picker submit (`action` = `signin` or absent), user `mfa` = `passkey`, no `error` | 200 passkey page (below) instead of a code |
 | 5 | Tenant `consentRequired` and no consent for `(client_id, tid)` | redirect `error=consent_required` "AADSTS65001: …" |
 | 6 | OK | new single-use code (10-minute TTL) → redirect `code` (+`state`) |
+
+**Passkey step.** A user with `"mfa": "passkey"` sees a simulated passkey page after the picker:
+no WebAuthn, no authenticator. "Use passkey" posts `action=passkey-approve` and runs checks 3–6;
+"Cancel" posts `action=passkey-deny` and redirects `error=access_denied` "AADSTS500121:
+Authentication failed during strong authentication request." (code and wording unverified against
+real Entra). The token's `amr` is still the user's configured `amr`; the demo `passkey` user sets
+`["fido", "mfa"]`, and `fido` as Entra's emitted value is an assumption. A GET with a resolved
+`login_hint` (including `prompt=none`) skips the page, as if the session already carried MFA;
+`prompt=login`/`select_account` forces the picker and so the page.
 
 Error redirects carry `error`, `error_description`, and `state`. (Real Entra shows some of these as
 an error page instead of redirecting; redirecting is a deliberate simplification so RPs can test
@@ -249,7 +259,7 @@ fields are rejected, so typos fail loudly at startup.
 Validation (startup error): at least one tenant; `tid` is a GUID and unique; `basePath` matches
 `^[A-Za-z0-9_-]+$` after trimming slashes; `groupClaimFormat` ∈ `name|object_id`; consent `clientId`
 non-empty and `tid` configured; user `username` non-empty, unique per tenant, `tid` configured;
-`error` ∈ `interaction_required|access_denied|invalid_grant`.
+`error` ∈ `interaction_required|access_denied|invalid_grant`; `mfa` ∈ `""|passkey`.
 
 ### 5.1 Runtime mutation (admin UI)
 
