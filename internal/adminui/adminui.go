@@ -16,8 +16,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
+	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/andychoi/mock-oidc/internal/config"
@@ -121,14 +124,22 @@ func (a *Handler) Handle(req *oauth2.Request) routing.Response {
 	if req.Method == http.MethodOptions {
 		return routing.Response{Status: http.StatusNoContent, Header: http.Header{}}
 	}
-	trimmed := strings.Trim(req.URL.Path, "/")
+	// The escaped path keeps an encoded "/" inside a name's segment; api
+	// unescapes each segment after splitting.
+	trimmed := strings.Trim(req.URL.EscapedPath(), "/")
 	rest := strings.TrimPrefix(trimmed, "admin")
 	rest = strings.TrimPrefix(rest, "/")
 	if rest == "mcp" {
 		return a.serveMCP(req)
 	}
 	if strings.HasPrefix(rest, "api/") {
-		if req.Method != http.MethodGet && req.Method != http.MethodPost && req.Method != http.MethodPut && req.Method != http.MethodDelete {
+		switch req.Method {
+		case http.MethodGet, http.MethodDelete:
+		case http.MethodPost, http.MethodPut:
+			if !jsonContent(req) {
+				return apiError(http.StatusUnsupportedMediaType, "content-type must be application/json")
+			}
+		default:
 			return routing.MethodNotAllowed()
 		}
 		return a.api(req, strings.TrimPrefix(rest, "api/"))
@@ -140,6 +151,20 @@ func (a *Handler) Handle(req *oauth2.Request) routing.Response {
 		return a.serve("index.html")
 	}
 	return a.serve(rest)
+}
+
+// jsonContent reports whether a write may reach the API. A JSON media type
+// forces a CORS preflight on any cross-origin browser request, and the admin
+// surface answers preflights without CORS headers. Browsers attach Origin to
+// every POST, so a write with neither Content-Type nor Origin comes from a
+// non-browser client.
+func jsonContent(req *oauth2.Request) bool {
+	ct := req.Header.Get("Content-Type")
+	if ct == "" && req.Header.Get("Origin") == "" {
+		return true
+	}
+	mt, _, _ := mime.ParseMediaType(ct)
+	return mt == "application/json"
 }
 
 func (a *Handler) serve(name string) routing.Response {
@@ -171,12 +196,16 @@ func badRequest(err error) routing.Response {
 
 func notFound() routing.Response { return routing.NotFound("not found") }
 
-// decode parses a JSON request body into out with unknown-field rejection.
+// decode parses a JSON request body holding exactly one value into out,
+// rejecting unknown fields.
 func decode(req *oauth2.Request, out any) error {
 	dec := json.NewDecoder(strings.NewReader(req.Body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		return fmt.Errorf("invalid json body: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("invalid json body: trailing data after the object")
 	}
 	return nil
 }
@@ -185,18 +214,22 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 	get, post := req.Method == http.MethodGet, req.Method == http.MethodPost
 	put, del := req.Method == http.MethodPut, req.Method == http.MethodDelete
 	segs := strings.Split(action, "/")
+	for i, seg := range segs {
+		if v, err := url.PathUnescape(seg); err == nil {
+			segs[i] = v
+		}
+	}
+	if segs[0] == "settings" && a.settings == nil ||
+		segs[0] == "entra" && a.entra == nil ||
+		segs[0] == "directory" && a.dir == nil {
+		return notFound()
+	}
 
 	switch {
 	// --- settings ---
 	case get && action == "settings":
-		if a.settings == nil {
-			return notFound()
-		}
 		return routing.JSON(settingsObj(a.settings.AdminSettings()))
 	case post && action == "settings":
-		if a.settings == nil {
-			return notFound()
-		}
 		var body struct {
 			Name  string `json:"name"`
 			Value bool   `json:"value"`
@@ -211,25 +244,13 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 
 	// --- entra: read + actions ---
 	case get && action == "entra":
-		if a.entra == nil {
-			return notFound()
-		}
 		return routing.JSON(a.entra.AdminSnapshot())
 	case post && action == "entra/reset":
-		if a.entra == nil {
-			return notFound()
-		}
 		a.entra.AdminResetToSeed()
 		return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 	case post && action == "entra/rotate-keys":
-		if a.entra == nil {
-			return notFound()
-		}
 		return routing.JSON(jsonx.Obj{{Name: "kid", V: a.entra.AdminRotateKeys()}})
 	case del && len(segs) == 4 && segs[0] == "entra" && segs[1] == "consents":
-		if a.entra == nil {
-			return notFound()
-		}
 		a.entra.AdminRevokeConsent(segs[2], segs[3])
 		return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 
@@ -242,9 +263,6 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 		case put:
 			return a.upsertTenant(req, tid)
 		case del:
-			if a.entra == nil {
-				return notFound()
-			}
 			if err := a.entra.AdminDeleteTenant(tid); err != nil {
 				return deleteError(err)
 			}
@@ -260,9 +278,6 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 		case put:
 			return a.upsertUser(req, tid, username)
 		case del:
-			if a.entra == nil {
-				return notFound()
-			}
 			if err := a.entra.AdminDeleteUser(tid, username); err != nil {
 				return deleteError(err)
 			}
@@ -271,24 +286,15 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 
 	// --- directory ---
 	case get && action == "directory":
-		if a.dir == nil {
-			return notFound()
-		}
 		return routing.JSON(directoryArr(a.dir))
 	case post && action == "directory/users":
 		return a.upsertDirectoryUser(req)
 	case len(segs) == 3 && segs[0] == "directory" && segs[1] == "users" && del:
-		if a.dir == nil {
-			return notFound()
-		}
 		if err := a.dir.Delete(segs[2]); err != nil {
 			return deleteError(err)
 		}
 		return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 	case post && action == "directory/reset":
-		if a.dir == nil {
-			return notFound()
-		}
 		a.dir.Reset()
 		return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 
@@ -330,9 +336,6 @@ func deleteError(err error) routing.Response {
 }
 
 func (a *Handler) upsertTenant(req *oauth2.Request, tid string) routing.Response {
-	if a.entra == nil {
-		return notFound()
-	}
 	var t entra.Tenant
 	if err := decode(req, &t); err != nil {
 		return badRequest(err)
@@ -350,9 +353,6 @@ func (a *Handler) upsertTenant(req *oauth2.Request, tid string) routing.Response
 }
 
 func (a *Handler) upsertUser(req *oauth2.Request, tid, username string) routing.Response {
-	if a.entra == nil {
-		return notFound()
-	}
 	var u entra.User
 	if err := decode(req, &u); err != nil {
 		return badRequest(err)
@@ -370,9 +370,6 @@ func (a *Handler) upsertUser(req *oauth2.Request, tid, username string) routing.
 }
 
 func (a *Handler) upsertDirectoryUser(req *oauth2.Request) routing.Response {
-	if a.dir == nil {
-		return notFound()
-	}
 	var u directory.User
 	if err := decode(req, &u); err != nil {
 		return badRequest(err)
