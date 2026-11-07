@@ -201,7 +201,7 @@ func (c *MappingCallback) TypeHeader(req *oauth2.TokenRequest) string {
 
 func (c *MappingCallback) Audience(req *oauth2.TokenRequest) []string {
 	claims, _ := c.resolve(req, nil)
-	return audienceFrom(claims["aud"])
+	return oauth2.AudienceList(claims["aud"])
 }
 
 func (c *MappingCallback) AddClaims(req *oauth2.TokenRequest) map[string]any {
@@ -229,7 +229,7 @@ func (w *mappingWithExtra) TypeHeader(req *oauth2.TokenRequest) string {
 
 func (w *mappingWithExtra) Audience(req *oauth2.TokenRequest) []string {
 	claims, _ := w.c.resolve(req, w.extra)
-	return audienceFrom(claims["aud"])
+	return oauth2.AudienceList(claims["aud"])
 }
 
 func (w *mappingWithExtra) AddClaims(req *oauth2.TokenRequest) map[string]any {
@@ -238,22 +238,6 @@ func (w *mappingWithExtra) AddClaims(req *oauth2.TokenRequest) map[string]any {
 }
 
 func (w *mappingWithExtra) TokenExpiry() int64 { return w.c.TokenExpiry() }
-
-func audienceFrom(v any) []string {
-	switch t := v.(type) {
-	case string:
-		return []string{t}
-	case []any:
-		var out []string
-		for _, e := range t {
-			if s, ok := e.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
-}
 
 // templateValues replaces ${var} occurrences in string claim values.
 func templateValues(claims map[string]any, params map[string]string) map[string]any {
