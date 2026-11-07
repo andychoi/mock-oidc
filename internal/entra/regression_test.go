@@ -150,3 +150,33 @@ func TestMembershipRuleNestingIsCapped(t *testing.T) {
 		t.Errorf("32 levels: %v", err)
 	}
 }
+
+// An object ID names one user or one group per tenant, whether configured or
+// derived.
+func TestDuplicateObjectIDsAreRejected(t *testing.T) {
+	const oid = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	tenants := `"tenants": [{"tid": "` + tidOne + `"}, {"tid": "` + tidTwo + `"}]`
+	rejected := map[string]string{
+		"user oids": `{` + tenants + `, "users": [
+		  {"username": "a", "tid": "` + tidOne + `", "oid": "` + oid + `"},
+		  {"username": "b", "tid": "` + tidOne + `", "oid": "` + strings.ToUpper(oid) + `"}]}`,
+		"group oids": `{"tenants": [{"tid": "` + tidOne + `", "groups": [
+		  {"name": "A", "oid": "` + oid + `"}, {"name": "B", "oid": "` + oid + `"}]}]}`,
+		"group oid equals a derived one": `{"tenants": [{"tid": "` + tidOne + `", "groups": [
+		  {"name": "A"}, {"name": "B", "oid": "` + GroupObjectID(tidOne, "A") + `"}]}]}`,
+	}
+	for name, js := range rejected {
+		if _, err := ParseConfig([]byte(js)); err == nil || !strings.Contains(err.Error(), "already used") {
+			t.Errorf("%s: err = %v, want a duplicate oid error", name, err)
+		}
+	}
+
+	s := NewStore(mustConfig(t, `{`+tenants+`, "users": [{"username": "a", "tid": "`+tidOne+`"}]}`))
+	derived := s.Snapshot().User(tidOne, "a").OID
+	if err := s.CreateUser(User{Username: "b", TID: tidOne, OID: derived}); err == nil {
+		t.Error("a user taking another user's derived oid must be rejected")
+	}
+	if err := s.CreateUser(User{Username: "b", TID: tidTwo, OID: derived}); err != nil {
+		t.Errorf("object IDs are per tenant: %v", err)
+	}
+}
