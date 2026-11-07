@@ -256,3 +256,27 @@ func TestGraphSelectValidatedWithoutRows(t *testing.T) {
 		}
 	}
 }
+
+// A disabled administrator cannot sign in, so it cannot grant admin consent
+// either.
+func TestAdminConsentRefusesDisabledAdmin(t *testing.T) {
+	h := New(mustConfig(t, `{"tenants": [{"tid": "`+tidOne+`"}],
+	  "users": [{"username": "off", "tid": "`+tidOne+`", "admin": true, "accountEnabled": false},
+	            {"username": "broken", "tid": "`+tidOne+`", "admin": true, "error": "invalid_grant"}]}`))
+	for _, username := range []string{"off", "broken"} {
+		resp := serve(h, http.MethodPost, "http://mock.test/entra/"+tidOne+"/v2.0/adminconsent?client_id=newapp"+
+			"&redirect_uri=http%3A%2F%2Fapp.test%2Fcb&state=cs1", "action=accept&tid="+tidOne+"&username="+username)
+		loc, err := url.Parse(resp.Header.Get("Location"))
+		if resp.Status != http.StatusFound || err != nil {
+			t.Fatalf("%s: consent = %d %s", username, resp.Status, resp.Body)
+		}
+		q := loc.Query()
+		if q.Get("error") != "access_denied" || q.Get("error_description") != "AADSTS50057: The user account is disabled." ||
+			q.Get("state") != "cs1" || q.Get("admin_consent") != "" {
+			t.Errorf("%s: consent redirect = %v, want access_denied AADSTS50057", username, q)
+		}
+	}
+	if consents := serve(h, http.MethodGet, "http://mock.test/entra/_entra/consents", ""); strings.Contains(consents.Body, "newapp") {
+		t.Errorf("consents = %s, want no grant for newapp", consents.Body)
+	}
+}
