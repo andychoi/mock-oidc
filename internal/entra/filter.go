@@ -8,7 +8,7 @@ import (
 )
 
 // This file implements the $filter subset of the Graph emulator (design:
-// docs/entra/04-org-directory-design.md §3):
+// docs/entra/04-org-directory-design.md §5):
 //
 //	or      := and ("or" and)*
 //	and     := unary ("and" unary)*
