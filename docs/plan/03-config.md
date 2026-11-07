@@ -44,7 +44,7 @@ Parsed with `encoding/json`; unknown fields ignored (matching Jackson's default 
 }
 ```
 
-- `initialKeys`: a **single JWK as a JSON string** (not an array) — first issuer draws this key (rebuilt with `kid = issuerId`). Absent → embedded deterministic initial keys.
+- `initialKeys`: a **single JWK as a JSON string** (not an array) — first issuer draws this key (rebuilt with `kid = issuerId`). Absent → embedded deterministic initial keys (RSA for RS*, P-256 for ES256); ES384 has no embedded P-384 keys, so every issuer gets a fresh P-384 key, as upstream does.
 - `algorithm`: `RS256/384/512`, `ES256/384` only; anything else → startup error (upstream throws `OAuth2Exception`; ES256K/ES512 unsupported).
 - `systemTime`: RFC-3339 instant; freezes `iat/nbf/exp` (deterministic tests) but **not** the `expires_in` response field (wall clock).
 
