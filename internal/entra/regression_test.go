@@ -191,3 +191,33 @@ func TestMintTokenRefusesInvalidGrantAccount(t *testing.T) {
 		t.Fatalf("mint-token = %d %.300s, want 400 AADSTS50057", resp.Status, resp.Body)
 	}
 }
+
+// An ID token issued to a client whose id is Graph's app id carries the Graph
+// audience, but it is still not an access token.
+func TestGraphRejectsIDTokens(t *testing.T) {
+	h := graphHandler(t)
+	base := "http://mock.test/entra/" + tidA + "/oauth2/v2.0/"
+	signin := serve(h, http.MethodPost, base+"authorize?response_type=code&client_id="+graphAppID+
+		"&redirect_uri=http%3A%2F%2Fapp.test%2Fcb&scope=openid", "tid="+tidA+"&username=jane")
+	loc, err := url.Parse(signin.Header.Get("Location"))
+	if signin.Status != http.StatusFound || err != nil {
+		t.Fatalf("sign-in: %d %s", signin.Status, signin.Body)
+	}
+	resp := serve(h, http.MethodPost, base+"token", "grant_type=authorization_code&client_id="+graphAppID+
+		"&code="+url.QueryEscape(loc.Query().Get("code"))+"&redirect_uri="+url.QueryEscape("http://app.test/cb"))
+	tokens := decodeBody(t, resp)
+	idToken, _ := tokens["id_token"].(string)
+	accessToken, _ := tokens["access_token"].(string)
+	if aud := jwtClaims(t, idToken)["aud"]; aud != graphAppID {
+		t.Fatalf("id_token aud = %v, want the Graph app id", aud)
+	}
+	if status, _ := graphGet(t, h, "/v1.0/me", accessToken); status != http.StatusOK {
+		t.Errorf("access token: /me status %d, want 200", status)
+	}
+	if status, _ := graphGet(t, h, "/v1.0/me", idToken); status != http.StatusUnauthorized {
+		t.Errorf("id token: /me status %d, want 401", status)
+	}
+	if status, _ := graphGet(t, h, "/oidc/userinfo", idToken); status != http.StatusUnauthorized {
+		t.Errorf("id token: userinfo status %d, want 401", status)
+	}
+}
