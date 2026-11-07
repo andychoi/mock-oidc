@@ -139,6 +139,7 @@
 
     add(drawer, el('h2', null, title));
     const form = add(drawer, el('form'));
+    form.id = 'drawer-form';
     const inputs = {};
     const errBox = add(drawer, el('div', 'error hidden'));
 
@@ -192,6 +193,7 @@
     cancel.addEventListener('click', close);
     const save = add(actions, el('button', 'btn btn-primary', saveLabel));
     save.type = 'submit';
+    save.setAttribute('form', form.id);
 
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
