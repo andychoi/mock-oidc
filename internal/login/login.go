@@ -7,6 +7,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"net/url"
 	"os"
 	"strings"
 
@@ -55,20 +56,38 @@ func (h *Handler) builtinLoginHTML(req *oauth2.Request) (string, *oauth2.Error) 
 	if err != nil {
 		return "", oauth2.ServerError(fmt.Sprintf("login template: %v", err))
 	}
-	query := req.URL.Query()
-	params := make([]struct{ Name, Value string }, 0, len(query))
-	for name, values := range query {
-		v := ""
-		if len(values) > 0 {
-			v = values[0]
-		}
-		params = append(params, struct{ Name, Value string }{name, v})
-	}
 	var buf strings.Builder
-	if err := tmpl.Execute(&buf, params); err != nil {
+	if err := tmpl.Execute(&buf, queryParams(req.URL.RawQuery)); err != nil {
 		return "", oauth2.ServerError(fmt.Sprintf("login template: %v", err))
 	}
 	return buf.String(), nil
+}
+
+type param struct{ Name, Value string }
+
+// queryParams lists the query parameters in request order with the first value
+// of each name, parsed like url.ParseQuery. url.Values is a map, so ranging
+// over it would shuffle the page on every request.
+func queryParams(rawQuery string) []param {
+	var params []param
+	seen := map[string]bool{}
+	for _, pair := range strings.Split(rawQuery, "&") {
+		if pair == "" || strings.Contains(pair, ";") {
+			continue
+		}
+		rawName, rawValue, _ := strings.Cut(pair, "=")
+		name, err := url.QueryUnescape(rawName)
+		if err != nil || seen[name] {
+			continue
+		}
+		value, err := url.QueryUnescape(rawValue)
+		if err != nil {
+			continue
+		}
+		seen[name] = true
+		params = append(params, param{name, value})
+	}
+	return params
 }
 
 func readFile(path string) (string, error) {
