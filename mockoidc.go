@@ -40,11 +40,7 @@ func WithRoutes(method, path string, h routing.Handler) Option {
 // (self-signed localhost certificate unless a keystore is configured).
 func New(cfg *config.OAuth2Config, opts ...Option) (*Server, error) {
 	if cfg == nil {
-		kp, err := token.DefaultKeyProvider("RS256")
-		if err != nil {
-			return nil, err
-		}
-		cfg = &config.OAuth2Config{TokenProvider: token.NewTokenProvider(kp, nil)}
+		cfg = &config.OAuth2Config{}
 	}
 	if cfg.TokenProvider == nil {
 		kp, err := token.DefaultKeyProvider("RS256")
