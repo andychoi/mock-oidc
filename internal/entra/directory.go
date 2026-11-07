@@ -39,14 +39,11 @@ func (u *User) PrincipalName(t *Tenant) string {
 }
 
 // MemberGroups is the user's effective membership: the statically assigned
-// group names followed by the dynamic ones, without duplicates. Every
-// membership consumer (the groups claim, memberOf, members) reads this.
+// group names followed by the dynamic ones, without duplicates or blanks.
+// Every membership consumer (the groups claim, memberOf, members) reads this.
 func (u *User) MemberGroups() []string {
-	if len(u.dynamicGroups) == 0 {
-		return u.Groups
-	}
 	out := make([]string, 0, len(u.Groups)+len(u.dynamicGroups))
-	seen := map[string]bool{}
+	seen := map[string]bool{"": true}
 	for _, list := range [][]string{u.Groups, u.dynamicGroups} {
 		for _, name := range list {
 			if !seen[name] {
@@ -179,13 +176,8 @@ func (c *Config) GroupsOf(u *User) []DirGroup {
 	if t == nil {
 		return nil
 	}
-	seen := map[string]bool{}
 	out := []DirGroup{}
 	for _, name := range u.MemberGroups() {
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
 		out = append(out, c.dirGroup(t, name))
 	}
 	return sortGroups(out)
