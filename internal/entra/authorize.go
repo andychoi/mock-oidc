@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -112,20 +113,13 @@ func readHints(req *oauth2.Request) authHints {
 	}
 }
 
-func (a authHints) has(p string) bool {
-	for _, v := range a.Prompt {
-		if v == p {
-			return true
-		}
-	}
-	return false
+// forcesPicker reports whether the client insists on an interactive choice.
+func (a authHints) forcesPicker() bool {
+	return slices.Contains(a.Prompt, "select_account") || slices.Contains(a.Prompt, "login")
 }
 
-// forcesPicker reports whether the client insists on an interactive choice.
-func (a authHints) forcesPicker() bool { return a.has("select_account") || a.has("login") }
-
 // silent reports a prompt=none request: no UI may be shown.
-func (a authHints) silent() bool { return a.has("none") }
+func (a authHints) silent() bool { return slices.Contains(a.Prompt, "none") }
 
 // matchesHint reports whether a hint names this account. Entra hints carry a
 // UPN, but an email or the configured username is accepted too, so a fixture

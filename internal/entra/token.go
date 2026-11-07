@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/andychoi/mock-oidc/internal/jsonx"
@@ -14,11 +15,12 @@ import (
 )
 
 func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
+	cfg := h.conf()
 	if gt := strings.TrimSpace(req.FormParam("grant_type")); gt != oauth2.GrantAuthorizationCode {
 		// client_credentials is opt-in: it changes who can get a token at
 		// all, and most relying-party tests want it refused.
-		if gt == "client_credentials" && h.conf().AppOnlyOn() {
-			return h.clientCredentials(req, sc, h.conf())
+		if gt == "client_credentials" && cfg.AppOnlyOn() {
+			return h.clientCredentials(req, sc, cfg)
 		}
 		return routing.ErrorResponse(&oauth2.Error{Code: "unsupported_grant_type",
 			Description: "AADSTS70003: The app requested an unsupported grant type '" + gt + "'.", Status: http.StatusBadRequest})
@@ -43,7 +45,6 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	if !pkceOK(c.req, tr.CodeVerifier) {
 		return invalidGrant("AADSTS501481: The Code_Verifier does not match the code_challenge supplied in the authorization request.")
 	}
-	cfg := h.conf()
 	t := cfg.Tenant(c.tid)
 	u := cfg.User(c.tid, c.username)
 	if t == nil || u == nil {
@@ -64,7 +65,7 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 		{Name: "ext_expires_in", V: cfg.TokenExpiry},
 		{Name: "access_token", V: h.keys.Sign(AccessTokenClaims(in))},
 	}
-	if hasScope(c.req.Scope, "offline_access") {
+	if slices.Contains(c.req.Scope, "offline_access") {
 		resp = append(resp, jsonx.Field{Name: "refresh_token", V: token.RandomAuthorizationCode()})
 	}
 	resp = append(resp, jsonx.Field{Name: "id_token", V: h.keys.Sign(IDTokenClaims(in))})
