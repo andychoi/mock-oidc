@@ -222,6 +222,21 @@ func TestGraphRejectsIDTokens(t *testing.T) {
 	}
 }
 
+// A group listed twice is one membership: it must not push the user over the
+// group limit or repeat in the claim.
+func TestDuplicateGroupIsOneMembership(t *testing.T) {
+	h := New(mustConfig(t, `{"tenants": [{"tid": "`+tidOne+`", "groupLimit": 1}],
+	  "users": [{"username": "jane", "tid": "`+tidOne+`", "groups": ["PMO", "PMO"]}]}`))
+	tok, err := h.AdminMintToken("http://mock.test", MintInput{TID: tidOne, Username: "jane"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := jwtClaims(t, tok.IDToken)
+	if got := fmt.Sprint(claims["groups"]); got != "[PMO]" || claims["_claim_names"] != nil {
+		t.Errorf("groups = %s, _claim_names = %v; want [PMO] and no overage", got, claims["_claim_names"])
+	}
+}
+
 // An unknown $select property is refused whether or not any row (or manager)
 // is rendered.
 func TestGraphSelectValidatedWithoutRows(t *testing.T) {
