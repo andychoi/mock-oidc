@@ -139,13 +139,8 @@ func claimString(claims map[string]any, name string) string {
 
 // claimTime reads a numeric date claim. JSON numbers decode as float64.
 func claimTime(claims map[string]any, name string) (int64, bool) {
-	switch v := claims[name].(type) {
-	case float64:
-		return int64(v), true
-	case int64:
-		return v, true
-	}
-	return 0, false
+	v, ok := claims[name].(float64)
+	return int64(v), ok
 }
 
 // ValidateAccessToken authenticates a Graph request. It accepts only an access
