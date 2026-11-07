@@ -28,6 +28,9 @@ const (
 	ErrInvalidGrant        = "invalid_grant"
 )
 
+// MFAPasskey makes the picker submit stop at a simulated passkey step.
+const MFAPasskey = "passkey"
+
 // Multi-tenant path segments.
 const (
 	ScopeOrganizations = "organizations"
@@ -116,6 +119,7 @@ type User struct {
 	AMR           []string `json:"amr"`
 	Admin         bool     `json:"admin"`
 	Error         string   `json:"error"`
+	MFA           string   `json:"mfa"`
 
 	// Account profile. These feed the Graph account surface and the matching
 	// optional token claims; every one of them is optional.
@@ -259,6 +263,11 @@ func (c *Config) normalize() error {
 		case "", ErrInteractionRequired, ErrAccessDenied, ErrInvalidGrant:
 		default:
 			return fmt.Errorf("user %s: error must be %s, %s or %s", u.Username, ErrInteractionRequired, ErrAccessDenied, ErrInvalidGrant)
+		}
+		switch u.MFA {
+		case "", MFAPasskey:
+		default:
+			return fmt.Errorf("user %s: mfa must be empty or %s, got %q", u.Username, MFAPasskey, u.MFA)
 		}
 		u.OID = strings.ToLower(u.OID)
 		if u.OID != "" && !guidRE.MatchString(u.OID) {

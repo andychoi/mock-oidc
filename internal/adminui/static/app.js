@@ -605,6 +605,8 @@
         help: u && (u.dynamicGroups || []).length
           ? 'Also in dynamic groups (from rules): ' + u.dynamicGroups.join(', ') : undefined },
       { name: 'amr', label: 'AMR', type: 'csv', value: u && u.amr, placeholder: 'pwd, mfa', wide: true },
+      { name: 'mfa', label: 'MFA step', type: 'select', value: u ? u.mfa || '' : '',
+        options: [{ value: '', label: 'none' }, { value: 'passkey', label: 'passkey (simulated)' }] },
       { name: 'admin', label: 'Admin (may grant admin consent)', type: 'checkbox', value: u && u.admin },
       { name: 'error', label: 'Error injection', type: 'select', value: u ? u.error : '', options: errOpts },
       { name: 'accountEnabled', label: 'Account enabled', type: 'checkbox',

@@ -44,6 +44,7 @@ func (h *Handler) AdminSnapshot() any {
 			{Name: "amr", V: u.AMR},
 			{Name: "admin", V: u.Admin},
 			{Name: "error", V: u.Error},
+			{Name: "mfa", V: u.MFA},
 			{Name: "givenName", V: u.GivenName},
 			{Name: "surname", V: u.Surname},
 			{Name: "upn", V: u.UPN},

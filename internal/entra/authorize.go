@@ -13,10 +13,23 @@ import (
 	"github.com/andychoi/mock-oidc/internal/token"
 )
 
-//go:embed templates/picker.html.tmpl
+//go:embed templates/picker.html.tmpl templates/passkey.html.tmpl
 var templatesFS embed.FS
 
-var pickerTmpl = template.Must(template.ParseFS(templatesFS, "templates/picker.html.tmpl"))
+var (
+	pickerTmpl  = template.Must(template.ParseFS(templatesFS, "templates/picker.html.tmpl"))
+	passkeyTmpl = template.Must(template.ParseFS(templatesFS, "templates/passkey.html.tmpl"))
+)
+
+// Form actions of the passkey step.
+const (
+	actionPasskeyApprove = "passkey-approve"
+	actionPasskeyDeny    = "passkey-deny"
+)
+
+// passkeyDenied is the error_description of a cancelled passkey step. The
+// AADSTS code and wording are a best guess, not checked against real Entra.
+const passkeyDenied = "AADSTS500121: Authentication failed during strong authentication request."
 
 // codeTTL mirrors Entra's roughly 10-minute authorization code lifetime.
 const codeTTL = 10 * time.Minute
@@ -208,6 +221,18 @@ func renderPicker(p pickerPage) routing.Response {
 	return routing.HTML(b.String())
 }
 
+type passkeyPage struct {
+	Action, TID, Username, Name, Email string
+}
+
+func renderPasskey(p passkeyPage) routing.Response {
+	var b strings.Builder
+	if err := passkeyTmpl.Execute(&b, p); err != nil {
+		return routing.ErrorResponse(oauth2.ServerError("passkey template: " + err.Error()))
+	}
+	return routing.HTML(b.String())
+}
+
 func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
 	ar, oerr := oauth2.ParseAuthRequest(req.URL.Query())
 	if oerr != nil {
@@ -257,6 +282,18 @@ func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response 
 	_, u, oerr := h.postedUser(req, sc)
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
+	}
+	switch req.FormParam("action") {
+	case actionPasskeyApprove:
+		return h.issueCode(req, ar, sc, h.conf(), u)
+	case actionPasskeyDeny:
+		return errorRedirect(ar.RedirectURI, ar.State, "access_denied", passkeyDenied)
+	}
+	// An injected error wins over the passkey step, so a misconfigured
+	// account fails the same way whether or not it also has MFA set.
+	if u.MFA == MFAPasskey && u.Error == "" {
+		return renderPasskey(passkeyPage{Action: req.URL.RequestURI(), TID: u.TID,
+			Username: u.Username, Name: u.Name, Email: u.Email})
 	}
 	return h.issueCode(req, ar, sc, h.conf(), u)
 }

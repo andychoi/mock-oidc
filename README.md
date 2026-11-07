@@ -189,7 +189,8 @@ Partner P `33333333-…` (consent required), and Org Chart `44444444-…` (org c
 in `extensionAttribute1`, dynamic `GRP_DEPT_…` groups, a `Direct Reports for`
 group, and an `org_code` claim mapped into the `iam` app's ID token). The account
 picker needs no password.
-Users cover MFA-required (`mfa`), disabled (`disabled`), overage (`many`), a
+Users cover MFA-required (`mfa`), a simulated passkey step (`passkey`, which
+signs in with `amr` `["fido", "mfa"]`), disabled (`disabled`), overage (`many`), a
 manager chain (`leo`/`mina` report to `jane`), and tenant admins for admin
 consent (`jane`, `custadmin`, `partneradmin`).
 
