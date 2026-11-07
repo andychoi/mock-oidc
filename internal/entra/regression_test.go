@@ -221,3 +221,23 @@ func TestGraphRejectsIDTokens(t *testing.T) {
 		t.Errorf("id token: userinfo status %d, want 401", status)
 	}
 }
+
+// An unknown $select property is refused whether or not any row (or manager)
+// is rendered.
+func TestGraphSelectValidatedWithoutRows(t *testing.T) {
+	h := graphHandler(t)
+	jane := graphToken(t, h, tidA, "jane")
+	for path, want := range map[string]int{
+		"/v1.0/users?$select=bogus&$skiptoken=100":                                                                        http.StatusBadRequest,
+		"/v1.0/me?$expand=manager($select=bogus)":                                                                         http.StatusBadRequest, // jane has no manager
+		"/v1.0/users?$expand=manager($select=bogus)&$skiptoken=100":                                                       http.StatusBadRequest,
+		"/v1.0/users?$select=displayName&$skiptoken=100":                                                                  http.StatusOK,
+		"/v1.0/users?$expand=manager($select=displayName)&$skiptoken=100":                                                 http.StatusOK,
+		"/v1.0/users?$select=displayName,manager&$expand=manager&$skiptoken=100":                                          http.StatusOK,
+		"/v1.0/users?$select=displayName,manager&$expand=manager&$filter=" + url.QueryEscape("displayName eq 'Sora Han'"): http.StatusOK,
+	} {
+		if status, body := graphGet(t, h, path, jane); status != want {
+			t.Errorf("GET %s = %d %.200v, want %d", path, status, body, want)
+		}
+	}
+}
