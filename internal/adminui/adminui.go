@@ -219,18 +219,17 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 			segs[i] = v
 		}
 	}
+	if segs[0] == "settings" && a.settings == nil ||
+		segs[0] == "entra" && a.entra == nil ||
+		segs[0] == "directory" && a.dir == nil {
+		return notFound()
+	}
 
 	switch {
 	// --- settings ---
 	case get && action == "settings":
-		if a.settings == nil {
-			return notFound()
-		}
 		return routing.JSON(settingsObj(a.settings.AdminSettings()))
 	case post && action == "settings":
-		if a.settings == nil {
-			return notFound()
-		}
 		var body struct {
 			Name  string `json:"name"`
 			Value bool   `json:"value"`
@@ -245,25 +244,13 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 
 	// --- entra: read + actions ---
 	case get && action == "entra":
-		if a.entra == nil {
-			return notFound()
-		}
 		return routing.JSON(a.entra.AdminSnapshot())
 	case post && action == "entra/reset":
-		if a.entra == nil {
-			return notFound()
-		}
 		a.entra.AdminResetToSeed()
 		return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 	case post && action == "entra/rotate-keys":
-		if a.entra == nil {
-			return notFound()
-		}
 		return routing.JSON(jsonx.Obj{{Name: "kid", V: a.entra.AdminRotateKeys()}})
 	case del && len(segs) == 4 && segs[0] == "entra" && segs[1] == "consents":
-		if a.entra == nil {
-			return notFound()
-		}
 		a.entra.AdminRevokeConsent(segs[2], segs[3])
 		return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 
@@ -276,9 +263,6 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 		case put:
 			return a.upsertTenant(req, tid)
 		case del:
-			if a.entra == nil {
-				return notFound()
-			}
 			if err := a.entra.AdminDeleteTenant(tid); err != nil {
 				return deleteError(err)
 			}
@@ -294,9 +278,6 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 		case put:
 			return a.upsertUser(req, tid, username)
 		case del:
-			if a.entra == nil {
-				return notFound()
-			}
 			if err := a.entra.AdminDeleteUser(tid, username); err != nil {
 				return deleteError(err)
 			}
@@ -305,24 +286,15 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 
 	// --- directory ---
 	case get && action == "directory":
-		if a.dir == nil {
-			return notFound()
-		}
 		return routing.JSON(directoryArr(a.dir))
 	case post && action == "directory/users":
 		return a.upsertDirectoryUser(req)
 	case len(segs) == 3 && segs[0] == "directory" && segs[1] == "users" && del:
-		if a.dir == nil {
-			return notFound()
-		}
 		if err := a.dir.Delete(segs[2]); err != nil {
 			return deleteError(err)
 		}
 		return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 	case post && action == "directory/reset":
-		if a.dir == nil {
-			return notFound()
-		}
 		a.dir.Reset()
 		return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 
@@ -364,9 +336,6 @@ func deleteError(err error) routing.Response {
 }
 
 func (a *Handler) upsertTenant(req *oauth2.Request, tid string) routing.Response {
-	if a.entra == nil {
-		return notFound()
-	}
 	var t entra.Tenant
 	if err := decode(req, &t); err != nil {
 		return badRequest(err)
@@ -384,9 +353,6 @@ func (a *Handler) upsertTenant(req *oauth2.Request, tid string) routing.Response
 }
 
 func (a *Handler) upsertUser(req *oauth2.Request, tid, username string) routing.Response {
-	if a.entra == nil {
-		return notFound()
-	}
 	var u entra.User
 	if err := decode(req, &u); err != nil {
 		return badRequest(err)
@@ -404,9 +370,6 @@ func (a *Handler) upsertUser(req *oauth2.Request, tid, username string) routing.
 }
 
 func (a *Handler) upsertDirectoryUser(req *oauth2.Request) routing.Response {
-	if a.dir == nil {
-		return notFound()
-	}
 	var u directory.User
 	if err := decode(req, &u); err != nil {
 		return badRequest(err)
