@@ -74,7 +74,7 @@ func (h *Handler) testAPI(req *oauth2.Request, action string) routing.Response {
 		sort.Strings(names)
 		obj := jsonx.Obj{}
 		for _, n := range names {
-			obj = append(obj, jsonx.Field{Name: n, V: GroupObjectID(t.TID, n)})
+			obj = append(obj, jsonx.Field{Name: n, V: t.GroupOID(n)})
 		}
 		return routing.JSON(obj)
 	}

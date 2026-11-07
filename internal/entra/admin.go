@@ -111,14 +111,10 @@ func (h *Handler) AdminSnapshot() any {
 func tenantGroups(t Tenant) jsonx.Arr {
 	out := jsonx.Arr{}
 	for _, g := range t.Groups {
-		oid := g.OID
-		if oid == "" {
-			oid = GroupObjectID(t.TID, g.Name)
-		}
 		out = append(out, jsonx.Obj{
 			{Name: "name", V: g.Name},
 			{Name: "description", V: g.Description},
-			{Name: "oid", V: oid},
+			{Name: "oid", V: t.GroupOID(g.Name)},
 			{Name: "configuredOid", V: g.OID},
 			{Name: "mailNickname", V: g.MailNickname},
 			{Name: "mail", V: g.Mail},

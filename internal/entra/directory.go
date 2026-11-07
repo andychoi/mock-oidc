@@ -9,8 +9,8 @@ import (
 // DirGroup is one group as the Graph surface sees it. Groups are not a
 // separate config entity: membership lives on the user (User.Groups) and a
 // tenant's groups are the union of the names its users use and the names it
-// declares metadata for. The object ID is the one GroupObjectID already emits
-// for "object_id" group claims, so a claim value and a Graph group are the
+// declares metadata for. The object ID is Tenant.GroupOID, the value
+// "object_id" group claims carry, so a claim value and a Graph group are the
 // same identifier.
 type DirGroup struct {
 	OID             string
@@ -88,10 +88,19 @@ func (t *Tenant) groupMeta(name string) *Group {
 	return nil
 }
 
+// GroupOID is the object ID of a group name in the tenant: the configured
+// oid, else the one derived from the name.
+func (t *Tenant) GroupOID(name string) string {
+	if m := t.groupMeta(name); m != nil && m.OID != "" {
+		return m.OID
+	}
+	return GroupObjectID(t.TID, name)
+}
+
 // dirGroup builds the Graph view of one group name in a tenant.
 func (c *Config) dirGroup(t *Tenant, name string) DirGroup {
 	g := DirGroup{
-		OID:             GroupObjectID(t.TID, name),
+		OID:             t.GroupOID(name),
 		Name:            name,
 		MailNickname:    mailNickname(name),
 		SecurityEnabled: true,
@@ -99,9 +108,6 @@ func (c *Config) dirGroup(t *Tenant, name string) DirGroup {
 	meta := t.groupMeta(name)
 	if meta == nil {
 		return g
-	}
-	if meta.OID != "" {
-		g.OID = meta.OID
 	}
 	g.Description = meta.Description
 	g.Mail = meta.Mail

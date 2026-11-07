@@ -177,7 +177,7 @@ func addGroups(c map[string]any, in TokenInput) {
 	vals := make([]string, 0, len(groups))
 	for _, g := range groups {
 		if t.GroupClaimFormat == FormatObjectID {
-			vals = append(vals, GroupObjectID(t.TID, g))
+			vals = append(vals, t.GroupOID(g))
 		} else {
 			vals = append(vals, g)
 		}
