@@ -256,3 +256,101 @@ func TestGraphSelectValidatedWithoutRows(t *testing.T) {
 		}
 	}
 }
+
+// A disabled administrator cannot sign in, so it cannot grant admin consent
+// either.
+func TestAdminConsentRefusesDisabledAdmin(t *testing.T) {
+	h := New(mustConfig(t, `{"tenants": [{"tid": "`+tidOne+`"}],
+	  "users": [{"username": "off", "tid": "`+tidOne+`", "admin": true, "accountEnabled": false},
+	            {"username": "broken", "tid": "`+tidOne+`", "admin": true, "error": "invalid_grant"}]}`))
+	for _, username := range []string{"off", "broken"} {
+		resp := serve(h, http.MethodPost, "http://mock.test/entra/"+tidOne+"/v2.0/adminconsent?client_id=newapp"+
+			"&redirect_uri=http%3A%2F%2Fapp.test%2Fcb&state=cs1", "action=accept&tid="+tidOne+"&username="+username)
+		loc, err := url.Parse(resp.Header.Get("Location"))
+		if resp.Status != http.StatusFound || err != nil {
+			t.Fatalf("%s: consent = %d %s", username, resp.Status, resp.Body)
+		}
+		q := loc.Query()
+		if q.Get("error") != "access_denied" || q.Get("error_description") != "AADSTS50057: The user account is disabled." ||
+			q.Get("state") != "cs1" || q.Get("admin_consent") != "" {
+			t.Errorf("%s: consent redirect = %v, want access_denied AADSTS50057", username, q)
+		}
+	}
+	if consents := serve(h, http.MethodGet, "http://mock.test/entra/_entra/consents", ""); strings.Contains(consents.Body, "newapp") {
+		t.Errorf("consents = %s, want no grant for newapp", consents.Body)
+	}
+}
+
+// A configured upn is the user's sign-in name everywhere, tokens included.
+func TestTokensCarryConfiguredUPN(t *testing.T) {
+	h := New(mustConfig(t, `{"tenants": [{"tid": "`+tidOne+`", "domains": ["corp.test"]}],
+	  "users": [{"username": "jane", "tid": "`+tidOne+`", "email": "jane@mail.test", "upn": "jane.doe@corp.test"}]}`))
+	tok, err := h.AdminMintToken("http://mock.test", MintInput{TID: tidOne, Username: "jane"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, jwt := range map[string]string{"id_token": tok.IDToken, "access_token": tok.AccessToken} {
+		if got := jwtClaims(t, jwt)["preferred_username"]; got != "jane.doe@corp.test" {
+			t.Errorf("%s preferred_username = %v, want the upn", name, got)
+		}
+	}
+}
+
+// $select=manager is valid whenever $expand=manager is present, including on
+// a user who has no manager to expand. Unknown properties stay refused.
+func TestGraphSelectManagerAcceptsManagerlessUsers(t *testing.T) {
+	h := graphHandler(t)
+	jane := graphToken(t, h, tidA, "jane") // jane has no manager; sora's manager is jane
+	const opts = "?$select=displayName,manager&$expand=manager"
+
+	status, body := graphGet(t, h, "/v1.0/users"+opts, jane)
+	rows, _ := body["value"].([]any)
+	managers := map[any]any{}
+	for _, row := range rows {
+		u, _ := row.(map[string]any)
+		if m, ok := u["manager"].(map[string]any); ok {
+			managers[u["displayName"]] = m["displayName"]
+		}
+	}
+	if status != http.StatusOK || len(rows) != 3 || len(managers) != 1 || managers["Sora Han"] != "Jane Kim" {
+		t.Errorf("GET /users%s = %d %.300v, want 200 with only Sora Han managed by Jane Kim", opts, status, body)
+	}
+
+	for _, path := range []string{"/v1.0/me" + opts, "/v1.0/users/jane@corp.example" + opts} {
+		status, body := graphGet(t, h, path, jane)
+		if status != http.StatusOK || body["displayName"] != "Jane Kim" || body["manager"] != nil {
+			t.Errorf("GET %s = %d %.300v, want 200 with displayName and no manager", path, status, body)
+		}
+	}
+
+	for _, path := range []string{
+		"/v1.0/users?$select=bogus",
+		"/v1.0/users?$select=bogus&$skiptoken=100",
+		"/v1.0/users?$select=displayName,bogus&$expand=manager",
+		"/v1.0/users?$select=manager",
+		"/v1.0/me?$select=bogus",
+		"/v1.0/me?$select=displayName,bogus&$expand=manager",
+		"/v1.0/me?$select=manager",
+	} {
+		if status, body := graphGet(t, h, path, jane); status != http.StatusBadRequest {
+			t.Errorf("GET %s = %d %.200v, want 400", path, status, body)
+		}
+	}
+}
+
+func TestGraphRefusesTokenOfInvalidGrantAccount(t *testing.T) {
+	h, req := verifyHandler(t, `{
+  "tenants": [{"tid": "11111111-1111-1111-1111-111111111111"}],
+  "users": [
+    {"username": "jane", "tid": "11111111-1111-1111-1111-111111111111"},
+    {"username": "broken", "tid": "11111111-1111-1111-1111-111111111111", "error": "invalid_grant"}
+  ]
+}`)
+	if _, gerr := h.ValidateAccessToken(req, h.conf(), mintAccess(h, req, "jane", nil)); gerr != nil {
+		t.Fatalf("enabled account must pass, got %+v", gerr)
+	}
+	caller, gerr := h.ValidateAccessToken(req, h.conf(), mintAccess(h, req, "broken", nil))
+	if gerr == nil || gerr.Status != http.StatusUnauthorized {
+		t.Fatalf("error: invalid_grant is a disabled account and must lose its Graph token, got caller=%+v err=%+v", caller, gerr)
+	}
+}

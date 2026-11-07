@@ -31,6 +31,9 @@ func (h *Handler) adminConsentPost(req *oauth2.Request, sc scope) routing.Respon
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
 	}
+	if u.Disabled() {
+		return errorRedirect(redirectURI, state, "access_denied", "AADSTS50057: The user account is disabled.")
+	}
 	if !u.Admin {
 		return errorRedirect(redirectURI, state, "access_denied",
 			"AADSTS90094: Admin consent is required for the permissions requested by this application. An administrator of the tenant must grant consent.")

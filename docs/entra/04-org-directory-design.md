@@ -156,7 +156,8 @@ GET /users?$filter=onPremisesExtensionAttributes/extensionAttribute1 eq 'DEPT001
 - The expanded manager carries `@odata.type: "#microsoft.graph.user"` and the default property set,
   or the inner `$select`. It survives the outer `$select`. A user without a manager has no
   `manager` property.
-- `$select=manager` without `$expand` gets 400 for an unknown property.
+- `$select=manager` with `$expand=manager` is valid on every user, including one without a
+  manager. Without `$expand`, it gets 400 for an unknown property.
 
 ## 7. Org data in tokens: claims mapping
 

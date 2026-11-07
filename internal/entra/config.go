@@ -52,8 +52,9 @@ type Config struct {
 }
 
 // App is an optional client registration. Entra mode accepts any client_id on
-// every flow; an entry here only supplies the app roles an app-only token
-// carries (§8 of the Graph design).
+// every flow; an entry here supplies the app roles an app-only token carries
+// (§8 of the Graph design) and the claims mappings its ID tokens get (§7 of
+// the org directory design).
 type App struct {
 	ClientID string         `json:"clientId"`
 	TID      string         `json:"tid"`
