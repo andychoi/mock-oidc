@@ -245,6 +245,7 @@ func (c *Config) normalize() error {
 		}
 	}
 	users := map[string]bool{}
+	oids := map[string]string{} // tid/oid -> username
 	for i := range c.Users {
 		u := &c.Users[i]
 		u.TID = strings.ToLower(strings.TrimSpace(u.TID))
@@ -276,6 +277,10 @@ func (c *Config) normalize() error {
 		if u.OID == "" {
 			u.OID = UUIDv5(oidNamespace, u.TID+":"+u.Username)
 		}
+		if prev, dup := oids[u.TID+"/"+u.OID]; dup {
+			return fmt.Errorf("user %s: oid %s already used by %s", u.Username, u.OID, prev)
+		}
+		oids[u.TID+"/"+u.OID] = u.Username
 		if u.Name == "" {
 			u.Name = u.Username
 		}
@@ -333,6 +338,7 @@ func (c *Config) evaluateDynamicGroups() error {
 // normalizeGroups validates a tenant's declared group metadata.
 func normalizeGroups(t *Tenant) error {
 	seen := map[string]bool{}
+	oids := map[string]string{} // oid -> group name
 	for i := range t.Groups {
 		g := &t.Groups[i]
 		g.Name = strings.TrimSpace(g.Name)
@@ -347,6 +353,11 @@ func normalizeGroups(t *Tenant) error {
 		if g.OID != "" && !guidRE.MatchString(g.OID) {
 			return fmt.Errorf("tenant %s: group %s: oid must be a GUID", t.TID, g.Name)
 		}
+		oid := t.GroupOID(g.Name)
+		if prev, dup := oids[oid]; dup {
+			return fmt.Errorf("tenant %s: group %s: oid %s already used by group %s", t.TID, g.Name, oid, prev)
+		}
+		oids[oid] = g.Name
 		g.MembershipRule = strings.TrimSpace(g.MembershipRule)
 		g.rule = nil
 		if g.Dynamic() {

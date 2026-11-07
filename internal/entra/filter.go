@@ -204,10 +204,26 @@ func lexFilter(src string) ([]filterTok, string) {
 	return out, ""
 }
 
+// maxNesting caps how deep "(" and "not" may nest in a $filter or a
+// membership rule. Both parsers recurse once per level, so without a cap one
+// request could grow a goroutine stack by hundreds of megabytes.
+const maxNesting = 32
+
 type filterParser struct {
 	toks      []filterTok
 	pos       int
 	odataType string
+	depth     int
+}
+
+// nest runs parse one nesting level deeper.
+func (p *filterParser) nest(parse func() (filterExpr, *graphError)) (filterExpr, *graphError) {
+	if p.depth == maxNesting {
+		return nil, invalidFilter("expression nested too deeply")
+	}
+	p.depth++
+	defer func() { p.depth-- }()
+	return parse()
 }
 
 func (p *filterParser) peek() (filterTok, bool) {
@@ -274,14 +290,14 @@ func (p *filterParser) and() (filterExpr, *graphError) {
 
 func (p *filterParser) unary() (filterExpr, *graphError) {
 	if p.word("not") {
-		inner, gerr := p.unary()
+		inner, gerr := p.nest(p.unary)
 		if gerr != nil {
 			return nil, gerr
 		}
 		return filterNot{inner}, nil
 	}
 	if p.word("(") {
-		inner, gerr := p.or()
+		inner, gerr := p.nest(p.or)
 		if gerr != nil {
 			return nil, gerr
 		}

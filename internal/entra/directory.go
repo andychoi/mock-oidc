@@ -9,8 +9,8 @@ import (
 // DirGroup is one group as the Graph surface sees it. Groups are not a
 // separate config entity: membership lives on the user (User.Groups) and a
 // tenant's groups are the union of the names its users use and the names it
-// declares metadata for. The object ID is the one GroupObjectID already emits
-// for "object_id" group claims, so a claim value and a Graph group are the
+// declares metadata for. The object ID is Tenant.GroupOID, the value
+// "object_id" group claims carry, so a claim value and a Graph group are the
 // same identifier.
 type DirGroup struct {
 	OID             string
@@ -39,14 +39,11 @@ func (u *User) PrincipalName(t *Tenant) string {
 }
 
 // MemberGroups is the user's effective membership: the statically assigned
-// group names followed by the dynamic ones, without duplicates. Every
-// membership consumer (the groups claim, memberOf, members) reads this.
+// group names followed by the dynamic ones, without duplicates or blanks.
+// Every membership consumer (the groups claim, memberOf, members) reads this.
 func (u *User) MemberGroups() []string {
-	if len(u.dynamicGroups) == 0 {
-		return u.Groups
-	}
 	out := make([]string, 0, len(u.Groups)+len(u.dynamicGroups))
-	seen := map[string]bool{}
+	seen := map[string]bool{"": true}
 	for _, list := range [][]string{u.Groups, u.dynamicGroups} {
 		for _, name := range list {
 			if !seen[name] {
@@ -61,10 +58,6 @@ func (u *User) MemberGroups() []string {
 // DynamicGroups returns the names of the dynamic groups the user's attributes
 // currently match.
 func (u *User) DynamicGroups() []string { return u.dynamicGroups }
-
-// MailOrEmpty is the user's mailbox address, which Graph reports as null when
-// there is none.
-func (u *User) MailOrEmpty() string { return u.Email }
 
 // mailNickname derives Graph's mailNickname from a display name: the
 // alphanumeric characters, lowercased.
@@ -88,10 +81,19 @@ func (t *Tenant) groupMeta(name string) *Group {
 	return nil
 }
 
+// GroupOID is the object ID of a group name in the tenant: the configured
+// oid, else the one derived from the name.
+func (t *Tenant) GroupOID(name string) string {
+	if m := t.groupMeta(name); m != nil && m.OID != "" {
+		return m.OID
+	}
+	return GroupObjectID(t.TID, name)
+}
+
 // dirGroup builds the Graph view of one group name in a tenant.
 func (c *Config) dirGroup(t *Tenant, name string) DirGroup {
 	g := DirGroup{
-		OID:             GroupObjectID(t.TID, name),
+		OID:             t.GroupOID(name),
 		Name:            name,
 		MailNickname:    mailNickname(name),
 		SecurityEnabled: true,
@@ -99,9 +101,6 @@ func (c *Config) dirGroup(t *Tenant, name string) DirGroup {
 	meta := t.groupMeta(name)
 	if meta == nil {
 		return g
-	}
-	if meta.OID != "" {
-		g.OID = meta.OID
 	}
 	g.Description = meta.Description
 	g.Mail = meta.Mail
@@ -173,13 +172,8 @@ func (c *Config) GroupsOf(u *User) []DirGroup {
 	if t == nil {
 		return nil
 	}
-	seen := map[string]bool{}
 	out := []DirGroup{}
 	for _, name := range u.MemberGroups() {
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
 		out = append(out, c.dirGroup(t, name))
 	}
 	return sortGroups(out)
