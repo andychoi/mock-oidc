@@ -337,3 +337,20 @@ func TestGraphSelectManagerAcceptsManagerlessUsers(t *testing.T) {
 		}
 	}
 }
+
+func TestGraphRefusesTokenOfInvalidGrantAccount(t *testing.T) {
+	h, req := verifyHandler(t, `{
+  "tenants": [{"tid": "11111111-1111-1111-1111-111111111111"}],
+  "users": [
+    {"username": "jane", "tid": "11111111-1111-1111-1111-111111111111"},
+    {"username": "broken", "tid": "11111111-1111-1111-1111-111111111111", "error": "invalid_grant"}
+  ]
+}`)
+	if _, gerr := h.ValidateAccessToken(req, h.conf(), mintAccess(h, req, "jane", nil)); gerr != nil {
+		t.Fatalf("enabled account must pass, got %+v", gerr)
+	}
+	caller, gerr := h.ValidateAccessToken(req, h.conf(), mintAccess(h, req, "broken", nil))
+	if gerr == nil || gerr.Status != http.StatusUnauthorized {
+		t.Fatalf("error: invalid_grant is a disabled account and must lose its Graph token, got caller=%+v err=%+v", caller, gerr)
+	}
+}
