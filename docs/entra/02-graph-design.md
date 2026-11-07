@@ -108,7 +108,7 @@ it. `appOnly` is the one feature that is off by default (§8).
 | `tenant.groups[]` | none | Group metadata: `name`, `description`, `mailNickname`, `mail`, `securityEnabled` (default `true`), `mailEnabled`, `oid`, and `membershipRule`. A configured `oid` must be a GUID, unique in the tenant, and is used in Graph and in `object_id` group claims alike. Group names that users list but nobody declares are created automatically. |
 | `user.givenName`, `surname` | none | `given_name` and `family_name` claims, and Graph fields |
 | `user.upn` | `email`, else `username@{first tenant domain}`, else the username | Graph `userPrincipalName`, and `preferred_username` in tokens and `userinfo` ([`00-design.md` §4.1](00-design.md#41-id-token-claims)) |
-| `user.accountEnabled` | `true` | `false` shows in Graph, makes `userinfo` and Graph calls with that user's token answer 401, and fails the token endpoint with AADSTS50057 |
+| `user.accountEnabled` | `true` | `false` shows in Graph, makes `userinfo` and Graph calls with that user's token answer 401, and fails the token endpoint with AADSTS50057. `error: "invalid_grant"` has the same effect. |
 | `user.jobTitle`, `officeLocation`, `businessPhones`, `mobilePhone`, `preferredLanguage` | none | Graph profile fields |
 | `user.roles` | none | `roles` claim in the ID and access tokens |
 | `user.wids` | none | `wids` claim, tenant-wide directory roles. Global Administrator is `62e90394-69f5-4237-9190-012177145e10`. |
