@@ -295,3 +295,45 @@ func TestTokensCarryConfiguredUPN(t *testing.T) {
 		}
 	}
 }
+
+// $select=manager is valid whenever $expand=manager is present, including on
+// a user who has no manager to expand. Unknown properties stay refused.
+func TestGraphSelectManagerAcceptsManagerlessUsers(t *testing.T) {
+	h := graphHandler(t)
+	jane := graphToken(t, h, tidA, "jane") // jane has no manager; sora's manager is jane
+	const opts = "?$select=displayName,manager&$expand=manager"
+
+	status, body := graphGet(t, h, "/v1.0/users"+opts, jane)
+	rows, _ := body["value"].([]any)
+	managers := map[any]any{}
+	for _, row := range rows {
+		u, _ := row.(map[string]any)
+		if m, ok := u["manager"].(map[string]any); ok {
+			managers[u["displayName"]] = m["displayName"]
+		}
+	}
+	if status != http.StatusOK || len(rows) != 3 || len(managers) != 1 || managers["Sora Han"] != "Jane Kim" {
+		t.Errorf("GET /users%s = %d %.300v, want 200 with only Sora Han managed by Jane Kim", opts, status, body)
+	}
+
+	for _, path := range []string{"/v1.0/me" + opts, "/v1.0/users/jane@corp.example" + opts} {
+		status, body := graphGet(t, h, path, jane)
+		if status != http.StatusOK || body["displayName"] != "Jane Kim" || body["manager"] != nil {
+			t.Errorf("GET %s = %d %.300v, want 200 with displayName and no manager", path, status, body)
+		}
+	}
+
+	for _, path := range []string{
+		"/v1.0/users?$select=bogus",
+		"/v1.0/users?$select=bogus&$skiptoken=100",
+		"/v1.0/users?$select=displayName,bogus&$expand=manager",
+		"/v1.0/users?$select=manager",
+		"/v1.0/me?$select=bogus",
+		"/v1.0/me?$select=displayName,bogus&$expand=manager",
+		"/v1.0/me?$select=manager",
+	} {
+		if status, body := graphGet(t, h, path, jane); status != http.StatusBadRequest {
+			t.Errorf("GET %s = %d %.200v, want 400", path, status, body)
+		}
+	}
+}
