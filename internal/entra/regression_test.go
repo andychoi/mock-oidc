@@ -103,3 +103,30 @@ func TestConfiguredGroupOIDAgreesAcrossClaimAndGraph(t *testing.T) {
 		t.Errorf("_entra/groups Admins = %v, want %s", got, adminsOID)
 	}
 }
+
+// Nesting is capped, so a request cannot grow a goroutine stack without bound.
+func TestGraphFilterNestingIsCapped(t *testing.T) {
+	h := graphHandler(t)
+	tok := graphToken(t, h, tidA, "jane")
+	const n = 10000
+	for name, filter := range map[string]string{
+		"balanced": strings.Repeat("(", n) + "displayName eq 'Jane Kim'" + strings.Repeat(")", n),
+		"unclosed": strings.Repeat("(", n),
+		"not":      strings.Repeat("not ", n) + "displayName eq 'Jane Kim'",
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := graphGet(t, h, "/v1.0/users?$filter="+url.QueryEscape(filter), tok)
+			if status != http.StatusBadRequest {
+				t.Fatalf("status %d, want 400", status)
+			}
+			msg, _ := body["error"].(map[string]any)["message"].(string)
+			if graphErrCode(t, body) != CodeUnsupportedQuery || !strings.HasPrefix(msg, "Invalid filter clause:") {
+				t.Fatalf("body %.200v, want an invalid filter error", body)
+			}
+		})
+	}
+	shallow := strings.Repeat("(", 32) + "displayName eq 'Jane Kim'" + strings.Repeat(")", 32)
+	if status, body := graphGet(t, h, "/v1.0/users?$filter="+url.QueryEscape(shallow), tok); status != http.StatusOK {
+		t.Fatalf("32 levels: status %d body %v", status, body)
+	}
+}
