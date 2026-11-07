@@ -126,6 +126,9 @@ func expandManager(req *oauth2.Request, cfg *Config, us []*User) ([]jsonx.Obj, *
 		}
 		innerSelect = val
 	}
+	if _, gerr := applySelect(filterSchemas[typeUser], innerSelect, typeUser); gerr != nil {
+		return nil, gerr
+	}
 	for i, u := range us {
 		m := cfg.ManagerOf(u)
 		if m == nil {

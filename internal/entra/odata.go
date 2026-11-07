@@ -262,6 +262,14 @@ func (h *Handler) renderCollection(req *oauth2.Request, cfg *Config, ctxSuffix s
 		}
 		items = kept
 	}
+	// Rows validate $select as they render, so an empty page needs this check.
+	schema := filterSchemas[odataType]
+	if _, expanded := req.URL.Query()["$expand"]; expandable && expanded {
+		schema = append(jsonx.Obj{{Name: "manager"}}, schema...)
+	}
+	if _, gerr := applySelect(schema, req.QueryParam("$select"), odataType); gerr != nil {
+		return h.graphErrorResponse(req, gerr)
+	}
 	top := cfg.parseTop(req.QueryParam("$top"))
 	skip := parseSkip(req.QueryParam("$skiptoken"))
 	total := len(items)
