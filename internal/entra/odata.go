@@ -165,31 +165,40 @@ func (c *Config) nextLink(req *oauth2.Request, nextSkip int) string {
 	return IssuerOrigin(req) + req.URL.Path + "?" + strings.Join(parts, "&")
 }
 
-// applySelect narrows an entity to the requested properties. `id` always
-// survives, as it does in Graph, and so does the entity's own context. An
-// unknown property is an error rather than a silent omission, because a
-// caller that misspells a field should hear about it.
-//
-// Without $select, the type's $select-only properties are dropped, leaving
-// Graph's default property set. Expanded navigation properties and
-// @odata.type always survive.
+// applySelect narrows entity to the requested properties, checking $select
+// against entity's own properties.
 func applySelect(entity jsonx.Obj, raw, odataType string) (jsonx.Obj, *graphError) {
+	keep, gerr := selection(entity, raw, odataType)
+	if gerr != nil {
+		return nil, gerr
+	}
+	return project(entity, keep, odataType), nil
+}
+
+// routeSelection resolves a route's $select against every property of
+// odataType, plus manager when the route expanded it. Checking the schema
+// instead of each row keeps $select=manager valid for a user without one.
+func routeSelection(req *oauth2.Request, odataType string, expandable bool) (map[string]bool, *graphError) {
+	schema := filterSchemas[odataType]
+	if _, expanded := req.URL.Query()["$expand"]; expandable && expanded {
+		schema = append(jsonx.Obj{{Name: "manager"}}, schema...)
+	}
+	return selection(schema, req.QueryParam("$select"), odataType)
+}
+
+// selection resolves $select against the properties of schema into the set
+// of names to keep, or nil when there is no $select. `id` always survives,
+// as it does in Graph, and so do the entity's own context, @odata.type and
+// expanded navigation properties. An unknown property is an error rather
+// than a silent omission, because a caller that misspells a field should
+// hear about it.
+func selection(schema jsonx.Obj, raw, odataType string) (map[string]bool, *graphError) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		hidden := selectOnly[odataType]
-		if len(hidden) == 0 {
-			return entity, nil
-		}
-		out := make(jsonx.Obj, 0, len(entity))
-		for _, f := range entity {
-			if !hidden[f.Name] {
-				out = append(out, f)
-			}
-		}
-		return out, nil
+		return nil, nil
 	}
-	known := make(map[string]string, len(entity))
-	for _, f := range entity {
+	known := make(map[string]string, len(schema))
+	for _, f := range schema {
 		known[strings.ToLower(f.Name)] = f.Name
 	}
 	keep := map[string]bool{"id": true, "@odata.context": true, "@odata.type": true}
@@ -207,13 +216,23 @@ func applySelect(entity jsonx.Obj, raw, odataType string) (jsonx.Obj, *graphErro
 		}
 		keep[name] = true
 	}
-	out := make(jsonx.Obj, 0, len(keep))
+	return keep, nil
+}
+
+// project narrows entity to keep. A nil keep (no $select) drops the type's
+// $select-only properties, leaving Graph's default property set.
+func project(entity jsonx.Obj, keep map[string]bool, odataType string) jsonx.Obj {
+	hidden := selectOnly[odataType]
+	if keep == nil && len(hidden) == 0 {
+		return entity
+	}
+	out := make(jsonx.Obj, 0, len(entity))
 	for _, f := range entity {
-		if keep[f.Name] {
+		if keep == nil && !hidden[f.Name] || keep[f.Name] {
 			out = append(out, f)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // graphEntity answers with a single entity, carrying the $entity context.
@@ -227,12 +246,12 @@ func (h *Handler) renderEntity(req *oauth2.Request, cfg *Config, ctxSuffix strin
 	if gerr := rejectUnsupportedOptions(req, refusedHere(false, expandable)...); gerr != nil {
 		return h.graphErrorResponse(req, gerr)
 	}
-	body := append(jsonx.Obj{{Name: "@odata.context", V: cfg.graphContext(req, ctxSuffix)}}, entity...)
-	body, gerr := applySelect(body, req.QueryParam("$select"), odataType)
+	keep, gerr := routeSelection(req, odataType, expandable)
 	if gerr != nil {
 		return h.graphErrorResponse(req, gerr)
 	}
-	return graphJSON(http.StatusOK, body)
+	body := append(jsonx.Obj{{Name: "@odata.context", V: cfg.graphContext(req, ctxSuffix)}}, entity...)
+	return graphJSON(http.StatusOK, project(body, keep, odataType))
 }
 
 // graphCollection answers with an OData collection: the items narrowed by
@@ -262,12 +281,8 @@ func (h *Handler) renderCollection(req *oauth2.Request, cfg *Config, ctxSuffix s
 		}
 		items = kept
 	}
-	// Rows validate $select as they render, so an empty page needs this check.
-	schema := filterSchemas[odataType]
-	if _, expanded := req.URL.Query()["$expand"]; expandable && expanded {
-		schema = append(jsonx.Obj{{Name: "manager"}}, schema...)
-	}
-	if _, gerr := applySelect(schema, req.QueryParam("$select"), odataType); gerr != nil {
+	keep, gerr := routeSelection(req, odataType, expandable)
+	if gerr != nil {
 		return h.graphErrorResponse(req, gerr)
 	}
 	top := cfg.parseTop(req.QueryParam("$top"))
@@ -282,11 +297,7 @@ func (h *Handler) renderCollection(req *oauth2.Request, cfg *Config, ctxSuffix s
 	}
 	page := make(jsonx.Arr, 0, end-skip)
 	for _, item := range items[skip:end] {
-		narrowed, gerr := applySelect(item, req.QueryParam("$select"), odataType)
-		if gerr != nil {
-			return h.graphErrorResponse(req, gerr)
-		}
-		page = append(page, narrowed)
+		page = append(page, project(item, keep, odataType))
 	}
 	body := jsonx.Obj{
 		{Name: "@odata.context", V: cfg.graphContext(req, ctxSuffix)},

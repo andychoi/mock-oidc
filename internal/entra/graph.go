@@ -126,7 +126,8 @@ func expandManager(req *oauth2.Request, cfg *Config, us []*User) ([]jsonx.Obj, *
 		}
 		innerSelect = val
 	}
-	if _, gerr := applySelect(filterSchemas[typeUser], innerSelect, typeUser); gerr != nil {
+	keep, gerr := selection(filterSchemas[typeUser], innerSelect, typeUser)
+	if gerr != nil {
 		return nil, gerr
 	}
 	for i, u := range us {
@@ -135,11 +136,7 @@ func expandManager(req *oauth2.Request, cfg *Config, us []*User) ([]jsonx.Obj, *
 			continue
 		}
 		mgr := append(jsonx.Obj{{Name: "@odata.type", V: "#" + typeUser}}, graphUser(cfg, m)...)
-		mgr, gerr := applySelect(mgr, innerSelect, typeUser)
-		if gerr != nil {
-			return nil, gerr
-		}
-		items[i] = append(items[i], jsonx.Field{Name: "manager", V: mgr})
+		items[i] = append(items[i], jsonx.Field{Name: "manager", V: project(mgr, keep, typeUser)})
 	}
 	return items, nil
 }
