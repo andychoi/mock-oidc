@@ -180,3 +180,14 @@ func TestDuplicateObjectIDsAreRejected(t *testing.T) {
 		t.Errorf("object IDs are per tenant: %v", err)
 	}
 }
+
+// error: invalid_grant and accountEnabled: false are the same account state,
+// so minting refuses both, like the token endpoint.
+func TestMintTokenRefusesInvalidGrantAccount(t *testing.T) {
+	h := New(mustConfig(t, `{"tenants": [{"tid": "`+tidOne+`"}],
+	  "users": [{"username": "broken", "tid": "`+tidOne+`", "error": "invalid_grant"}]}`))
+	resp := serve(h, http.MethodPost, "http://mock.test/entra/_entra/mint-token", "tid="+tidOne+"&username=broken")
+	if resp.Status != http.StatusBadRequest || !strings.Contains(resp.Body, "aadsts50057") {
+		t.Fatalf("mint-token = %d %.300s, want 400 AADSTS50057", resp.Status, resp.Body)
+	}
+}
