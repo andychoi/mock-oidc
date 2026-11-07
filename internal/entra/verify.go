@@ -149,8 +149,8 @@ func claimTime(claims map[string]any, name string) (int64, bool) {
 }
 
 // ValidateAccessToken authenticates a Graph request. It accepts only an access
-// token this handler minted: signed by a published key, carrying the Graph
-// audience and ver 2.0, issued for this very origin, inside its validity
+// token this handler minted: signed by a published key, carrying appid, the
+// Graph audience and ver 2.0, issued for this very origin, inside its validity
 // window (with the configured skew), and naming a tenant — and, for a
 // delegated token, an enabled user — that still exists.
 //
@@ -164,7 +164,10 @@ func (h *Handler) ValidateAccessToken(req *oauth2.Request, cfg *Config, bearer s
 	if !ok {
 		return nil, invalidToken()
 	}
-	if claimString(claims, "aud") != graphAppID || claimString(claims, "ver") != "2.0" {
+	// Every access token carries appid and no ID token does; reservedClaims
+	// keeps a claims mapping from adding it. An ID token issued to a client
+	// whose id is Graph's app id would otherwise pass the audience check.
+	if claimString(claims, "aud") != graphAppID || claimString(claims, "ver") != "2.0" || claimString(claims, "appid") == "" {
 		return nil, invalidToken()
 	}
 	tid := strings.ToLower(claimString(claims, "tid"))
@@ -191,9 +194,6 @@ func (h *Handler) ValidateAccessToken(req *oauth2.Request, cfg *Config, bearer s
 		Sub:      claimString(claims, "sub"),
 		ClientID: claimString(claims, "appid"),
 		Kind:     TokenAppOnly,
-	}
-	if c.ClientID == "" {
-		c.ClientID = claimString(claims, "azp")
 	}
 	if c.OID == "" {
 		return c, nil // app-only: no user to resolve
