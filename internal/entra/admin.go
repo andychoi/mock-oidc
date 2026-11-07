@@ -111,14 +111,10 @@ func (h *Handler) AdminSnapshot() any {
 func tenantGroups(t Tenant) jsonx.Arr {
 	out := jsonx.Arr{}
 	for _, g := range t.Groups {
-		oid := g.OID
-		if oid == "" {
-			oid = GroupObjectID(t.TID, g.Name)
-		}
 		out = append(out, jsonx.Obj{
 			{Name: "name", V: g.Name},
 			{Name: "description", V: g.Description},
-			{Name: "oid", V: oid},
+			{Name: "oid", V: t.GroupOID(g.Name)},
 			{Name: "configuredOid", V: g.OID},
 			{Name: "mailNickname", V: g.MailNickname},
 			{Name: "mail", V: g.Mail},
@@ -210,6 +206,7 @@ var errAccountDisabled = errors.New("account is disabled")
 // AdminMintToken issues access and ID tokens for a configured, enabled
 // account without the sign-in UI. issuerOrigin is IssuerOrigin(req) of the
 // calling request. An unknown account wraps ErrNotFound; a disabled one
+// (accountEnabled: false or error: invalid_grant, as at the token endpoint)
 // wraps errAccountDisabled.
 func (h *Handler) AdminMintToken(issuerOrigin string, in MintInput) (MintedToken, error) {
 	cfg := h.conf()
@@ -217,7 +214,7 @@ func (h *Handler) AdminMintToken(issuerOrigin string, in MintInput) (MintedToken
 	if u == nil {
 		return MintedToken{}, fmt.Errorf("user %s in tenant %s: %w", in.Username, in.TID, ErrNotFound)
 	}
-	if !u.Enabled() {
+	if !u.Enabled() || u.Error == ErrInvalidGrant {
 		return MintedToken{}, fmt.Errorf("user %s in tenant %s: %w", in.Username, in.TID, errAccountDisabled)
 	}
 	clientID := in.ClientID

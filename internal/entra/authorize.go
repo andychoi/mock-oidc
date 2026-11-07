@@ -3,7 +3,9 @@ package entra
 import (
 	"embed"
 	"html/template"
+	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -111,20 +113,13 @@ func readHints(req *oauth2.Request) authHints {
 	}
 }
 
-func (a authHints) has(p string) bool {
-	for _, v := range a.Prompt {
-		if v == p {
-			return true
-		}
-	}
-	return false
+// forcesPicker reports whether the client insists on an interactive choice.
+func (a authHints) forcesPicker() bool {
+	return slices.Contains(a.Prompt, "select_account") || slices.Contains(a.Prompt, "login")
 }
 
-// forcesPicker reports whether the client insists on an interactive choice.
-func (a authHints) forcesPicker() bool { return a.has("select_account") || a.has("login") }
-
 // silent reports a prompt=none request: no UI may be shown.
-func (a authHints) silent() bool { return a.has("none") }
+func (a authHints) silent() bool { return slices.Contains(a.Prompt, "none") }
 
 // matchesHint reports whether a hint names this account. Entra hints carry a
 // UPN, but an email or the configured username is accepted too, so a fixture
@@ -233,7 +228,7 @@ func renderPasskey(p passkeyPage) routing.Response {
 	return routing.HTML(b.String())
 }
 
-func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
+func (h *Handler) authorize(req *oauth2.Request, sc scope) routing.Response {
 	ar, oerr := oauth2.ParseAuthRequest(req.URL.Query())
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
@@ -244,6 +239,13 @@ func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
 	if rm := ar.ResponseMode; rm != "" && rm != "query" {
 		return unsupportedResponseMode(rm)
 	}
+	if req.Method == http.MethodPost {
+		return h.authorizePost(req, sc, ar)
+	}
+	return h.authorizeGet(req, sc, ar)
+}
+
+func (h *Handler) authorizeGet(req *oauth2.Request, sc scope, ar *oauth2.AuthRequest) routing.Response {
 	cfg := h.conf()
 	hints := readHints(req)
 	// A login_hint naming exactly one account stands in for a session: it is
@@ -268,24 +270,15 @@ func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
 		Submit: "signin", Hint: hints.LoginHint, Tenants: h.pickerTenants(cfg, sc, hints)})
 }
 
-func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response {
-	ar, oerr := oauth2.ParseAuthRequest(req.URL.Query())
-	if oerr != nil {
-		return routing.ErrorResponse(oerr)
-	}
-	if !ar.ImpliesCodeFlow() {
-		return unsupportedResponseType(ar)
-	}
-	if rm := ar.ResponseMode; rm != "" && rm != "query" {
-		return unsupportedResponseMode(rm)
-	}
-	_, u, oerr := h.postedUser(req, sc)
+func (h *Handler) authorizePost(req *oauth2.Request, sc scope, ar *oauth2.AuthRequest) routing.Response {
+	cfg := h.conf()
+	_, u, oerr := h.postedUser(req, sc, cfg)
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
 	}
 	switch req.FormParam("action") {
 	case actionPasskeyApprove:
-		return h.issueCode(req, ar, sc, h.conf(), u)
+		return h.issueCode(req, ar, sc, cfg, u)
 	case actionPasskeyDeny:
 		return errorRedirect(ar.RedirectURI, ar.State, "access_denied", passkeyDenied)
 	}
@@ -295,7 +288,7 @@ func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response 
 		return renderPasskey(passkeyPage{Action: req.URL.RequestURI(), TID: u.TID,
 			Username: u.Username, Name: u.Name, Email: u.Email})
 	}
-	return h.issueCode(req, ar, sc, h.conf(), u)
+	return h.issueCode(req, ar, sc, cfg, u)
 }
 
 // issueCode applies the per-account checks and mints an authorization code.
@@ -327,8 +320,7 @@ func (h *Handler) issueCode(req *oauth2.Request, ar *oauth2.AuthRequest, sc scop
 
 // postedUser resolves the account chosen on the picker (form fields tid and
 // username) within the request scope. Shared with admin consent.
-func (h *Handler) postedUser(req *oauth2.Request, sc scope) (*Tenant, *User, *oauth2.Error) {
-	cfg := h.conf()
+func (h *Handler) postedUser(req *oauth2.Request, sc scope, cfg *Config) (*Tenant, *User, *oauth2.Error) {
 	u := cfg.User(req.FormParam("tid"), req.FormParam("username"))
 	if u == nil {
 		return nil, nil, oauth2.InvalidRequest("AADSTS50034: The user account does not exist in this directory.")

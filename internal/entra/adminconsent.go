@@ -27,7 +27,7 @@ func (h *Handler) adminConsentPost(req *oauth2.Request, sc scope) routing.Respon
 	if req.FormParam("action") == "cancel" {
 		return errorRedirect(redirectURI, state, "access_denied", "AADSTS65004: User declined to consent to access the app.")
 	}
-	t, u, oerr := h.postedUser(req, sc)
+	t, u, oerr := h.postedUser(req, sc, h.conf())
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
 	}

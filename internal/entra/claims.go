@@ -3,6 +3,7 @@ package entra
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"slices"
 	"strings"
 	"time"
 
@@ -78,7 +79,7 @@ func baseClaims(in TokenInput) map[string]any {
 		"preferred_username": preferredUsername(in.Tenant, in.User),
 		"uti":                token.RandomAuthorizationCode()[:22],
 	}
-	if in.User.Email != "" && hasScope(in.Scopes, "email") {
+	if in.User.Email != "" && slices.Contains(in.Scopes, "email") {
 		c["email"] = in.User.Email
 	}
 	if in.User.EmailVerified != nil {
@@ -177,7 +178,7 @@ func addGroups(c map[string]any, in TokenInput) {
 	vals := make([]string, 0, len(groups))
 	for _, g := range groups {
 		if t.GroupClaimFormat == FormatObjectID {
-			vals = append(vals, GroupObjectID(t.TID, g))
+			vals = append(vals, t.GroupOID(g))
 		} else {
 			vals = append(vals, g)
 		}
@@ -217,13 +218,4 @@ func (c *Config) MappedClaims(clientID string, u *User) map[string]string {
 		}
 	}
 	return out
-}
-
-func hasScope(scopes []string, s string) bool {
-	for _, v := range scopes {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
