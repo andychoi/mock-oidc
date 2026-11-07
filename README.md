@@ -1,47 +1,47 @@
 # mock-oidc
 
-Shared **dev/test OIDC identity provider** for Andy's local projects — a mock Azure AD.
+A shared dev and test OIDC identity provider for local projects. It stands in for Azure AD and,
+in Entra mode, for Microsoft Entra ID.
 
-The server is **native Go, built from this repo**: a faithful port of
-[navikt/mock-oauth2-server](https://github.com/navikt/mock-oauth2-server) 6.0.2
-(the JVM server this repo used to run as a container). Discovery documents,
-JWKS (including the deterministic initial keys), grant behavior and error
-responses are byte-for-byte compatible with 6.0.2; the rewrite plan and the
-compatibility contract live in [docs/plan](docs/plan/00-overview.md).
+The server is native Go, built from this repo. It ports
+[navikt/mock-oauth2-server](https://github.com/navikt/mock-oauth2-server) 6.0.2, the JVM server
+this repo used to run as a container. Discovery documents, JWKS (including the deterministic
+initial keys), grant behavior, and error responses match 6.0.2 byte for byte, with one
+deliberate exception: `response_mode=form_post` refuses a `redirect_uri` that is not `http` or
+`https`. The compatibility contract is in [docs/plan/00-overview.md](docs/plan/00-overview.md).
 
-Runs standalone at **https://oidc.dev.test** (port 443), independent of any project's
-Docker network — apps reach it like an external IdP, mirroring production. TLS
-terminates in the server itself from a mkcert certificate (the ai-gateway pattern),
-and the one listener serves plain HTTP DUAL — port **8088** stays up for legacy
-consumers (`http://mock-oidc.dev.test:8088`).
-
-```
-image: built from this repo (see Quick start)
-parity reference: ghcr.io/navikt/mock-oauth2-server:6.0.2
-```
+The shared instance runs at `https://oidc.dev.test` (port 443), outside any project's Docker
+network, so apps reach it like an external IdP. The server terminates TLS itself with a mkcert
+certificate. The same listener also serves plain HTTP, and port 8088 stays published for legacy
+consumers (`http://mock-oidc.dev.test:8088`). Both ports bind to `127.0.0.1`, so only this
+machine can reach the server.
 
 ## Quick start
 
 ```bash
-make tls   # once per clone: mkcert cert into ./tls (gitignored; `mkcert -install` once per machine)
+make tls   # once per clone: mkcert cert into ./tls (gitignored; run `mkcert -install` once per machine)
 docker compose -p infra-apps -f ../infra-apps/compose.yaml up -d --build mock-oidc
-# IdP listens on https://oidc.dev.test (443) — plain http://localhost:8088 still served
 ```
 
-### Hostname setup (`oidc.dev.test` — host + Docker)
+`../infra-apps/compose.yaml` includes this repo's `docker-compose.yml`. Do not run a bare
+`docker compose up` here: it moves the container out of the `infra-apps` project. `make up`,
+`make down`, `make restart`, `make status`, and `make logs` run the same command for this
+service.
 
-One hostname for the IdP means the issuer URL, browser redirects, and the `iss`
-claim are identical whether the consumer runs on the host or in a container.
+### Hostname setup
 
-**Host apps** (one-time):
+One hostname means the issuer URL, the browser redirects, and the `iss` claim are the same
+whether the consumer runs on the host or in a container.
+
+For host apps, add this line once:
 
 ```
 # /etc/hosts
 127.0.0.1 oidc.dev.test mock-oidc.dev.test
 ```
 
-**Dockerized consumers** — containers cannot see the host's `/etc/hosts`, so map
-the name to the host gateway in each consumer's `docker-compose.yml`:
+Containers cannot see the host's `/etc/hosts`. Map the name to the host gateway in each
+consumer's compose file:
 
 ```yaml
 services:
@@ -50,160 +50,162 @@ services:
       - "oidc.dev.test:host-gateway"
 ```
 
-`host-gateway` is Docker's alias for the host (Docker Desktop maps it to
-`host.docker.internal`). Without this line containers fail with
-`bad address` for `oidc.dev.test`.
+Without this line, containers fail with `bad address` for `oidc.dev.test`.
 
-## Connection values (Issuer URL / Client ID / Client Secret)
+## Connect an app
 
-There is **no client registration** — the mock server accepts any
-credentials you choose. To hook an app up, fill in these three values yourself:
+There is no client registration. The server accepts any client credentials, so you pick the
+values:
 
 | Value | What to use | Rules |
 |---|---|---|
-| **Issuer URL** | `https://oidc.dev.test/oidc` (canonical, TLS; `http://localhost:8088/oidc` without any `/etc/hosts` entry) | The **last path segment defines the issuer** — any path works, but `/oidc` is the convention. Use one hostname consistently; the server echoes it back as `iss`. |
-| **Client ID** | Your app's name, e.g. `dochub`, `signflow` | Any non-empty string. It is echoed back as the token's `aud` claim. |
-| **Client Secret** | `<app>-dev-secret`, e.g. `dochub-dev-secret` | Any string — the token endpoint accepts arbitrary client credentials (Basic auth or form body). |
-| **Redirect URI** | e.g. `http://localhost:3000/api/auth/oidc/callback` | Any URI your app serves. Must be **identical** in the authorize request and the token exchange. |
+| Issuer URL | `https://oidc.dev.test/oidc` (or `http://localhost:8088/oidc` without an `/etc/hosts` entry) | The first path segment is the issuer, so any segment works. `/oidc` is the convention. Use one hostname everywhere, because the server echoes it back as `iss`. |
+| Client ID | Your app's name, for example `dochub` | Any non-empty string. The token's `aud` claim echoes it. |
+| Client secret | `<app>-dev-secret`, for example `dochub-dev-secret` | Any string, sent by Basic auth or in the form body. |
+| Redirect URI | For example `http://localhost:3000/api/auth/oidc/callback` | Any URI your app serves. It must be the same in the authorize request and the token exchange. With `response_mode=form_post` it must be `http` or `https`, or the authorize request gets `400 invalid_request`. |
 
-Sanity-check the issuer (should return JSON with `"issuer": ".../oidc"`):
-
-```bash
-curl http://localhost:8088/oidc/.well-known/openid-configuration
+```env
+OIDC_ISSUER_URL=https://oidc.dev.test/oidc
+OIDC_CLIENT_ID=dochub
+OIDC_CLIENT_SECRET=dochub-dev-secret
+OIDC_REDIRECT_URI=http://<app-host>/api/auth/oidc/callback
 ```
 
-Your app fetches all other endpoints (authorize/token/jwks/userinfo) from that
-discovery document — no further URLs to configure.
+Your app reads every other endpoint from the discovery document. To check the issuer, run:
 
-Running the consumer **inside Docker**? Containers can't resolve
-`oidc.dev.test` on their own — add the `extra_hosts` line from
-[Hostname setup](#hostname-setup-oidcdevtest--host--docker) below.
-
-Verified live against 6.0.2: a full authorization-code flow with made-up
-`client_id=verify-any-client` / `secret=not-a-real-secret` succeeds, and the
-resulting ID token carries `aud`, `groups`, and `tid` as documented below.
-
-## Endpoints (issuer path: `/oidc`)
+```bash
+curl http://localhost:8088/oidc/.well-known/openid-configuration   # "issuer": ".../oidc"
+```
 
 | Endpoint | URL |
 |---|---|
 | Discovery | `https://oidc.dev.test/oidc/.well-known/openid-configuration` |
-| Authorize (interactive login) | `https://oidc.dev.test/oidc/authorize` |
+| Authorize | `https://oidc.dev.test/oidc/authorize` |
 | Token | `https://oidc.dev.test/oidc/token` |
 | JWKS | `https://oidc.dev.test/oidc/jwks` |
 | Userinfo | `https://oidc.dev.test/oidc/userinfo` |
 
-Issuer: `https://oidc.dev.test/oidc` (legacy: `http://localhost:8088/oidc`).
+The custom login page (`mock-oidc-login.html`) offers one-click sign-in as any directory user.
+The password field accepts any value.
 
 ## TLS
 
-HTTPS is the ai-gateway pattern: a **mkcert** PEM pair in `./tls/` (gitignored —
-`make tls` regenerates; SANs cover `oidc.dev.test`, the legacy
-`mock-oidc.dev.test`, `localhost`, and both loopback IPs), wired through the
-`httpServer.ssl.certificateFile` / `privateKeyFile` config block. The server
-serves HTTPS and plain HTTP **on the same listener** (first-byte sniffing), so
-`http://localhost:8088` keeps working for anything not yet migrated. A missing
-or bad cert/key is a fatal boot error, never a silent HTTP-only fallback.
+`make tls` writes a mkcert PEM pair to `./tls/` with SANs for `oidc.dev.test`,
+`mock-oidc.dev.test`, `localhost`, `127.0.0.1`, and `::1`. The config block
+`httpServer.ssl.certificateFile` and `privateKeyFile` points the server at it. The listener
+reads the first byte of each connection and serves HTTPS or plain HTTP on the same port. A
+missing or bad certificate or key stops the server at startup. It never falls back to HTTP only.
 
 ## Admin UI
 
-`https://oidc.dev.test/admin/` (or `http://localhost:8088/admin/`) — a
-dependency-free dashboard (GitHub Primer
-theme, light/dark) served by the same process. Unauthenticated, like the rest
-of the server; its mutations change in-memory state only (a restart returns to
-the config files, and every page has a reset-to-seed action).
+`https://oidc.dev.test/admin/` is a dashboard served by the same process (GitHub Primer theme,
+light and dark). It has no authentication, like the rest of the server. Every edit changes
+in-memory state only. A restart returns to the config files, and every page has a reset action.
 
-- **Overview**: server KPIs, a clickable endpoint table for the root issuer
-  and every token-callback issuer, and runtime **settings toggles** —
-  interactive login, refresh-token rotation, and Entra mode on/off.
-- **Entra** (only when configured): full CRUD for **tenants and users**
-  (including the account profile fields the Graph API serves) and a Graph
-  on/off toggle
-  (drawer forms, same validation as the config file), consents with per-row
-  revoke, signing keys with rotation, and **Reset to config**.
-- **Directory**: the navikt login page quick-picks. Maintained here and
-  rendered live by the custom login page; seeded from `demo-users.json` via
-  `USER_DIRECTORY_PATH` (set in docker-compose; defaults to `./demo-users.json`
-  when present). Any username is still accepted on the login page itself.
+- **Overview** shows server counts, an endpoint table for the root issuer and every
+  token-callback issuer, and runtime toggles for interactive login, refresh-token rotation,
+  Entra mode, and the Entra Graph API.
+- **Entra** (only when configured) edits tenants and users, including the profile fields Graph
+  serves. It lists consents with per-row revoke and signing keys with rotation, and has
+  **Reset to config**. Edits get the same validation as the config file.
+- **Directory** edits the login page's quick-pick users. The login page fetches them live. The
+  directory loads from `USER_DIRECTORY_PATH`, or from `./demo-users.json` when that variable is
+  unset and the file exists. The login page still accepts any username.
 
-The admin JSON API lives under `/admin/api/` (`settings`, `entra`,
-`entra/tenants`, `entra/users`, `entra/consents`, `directory`); see
-`internal/adminui/adminui.go` for the surface.
+The dashboard calls a JSON API under `/admin/api/`:
 
-## MCP (AI agents)
+| Method | Path | Action |
+|---|---|---|
+| GET | `overview` | Server counts and toggles |
+| GET, POST | `settings` | Read the toggles. Set one with `{"name": "...", "value": true}`. Names: `interactiveLogin`, `rotateRefreshToken`, `entra`, `graph`. |
+| GET | `entra` | Entra tenants, users, consents, and keys |
+| POST | `entra/reset` | Restore tenants, users, and consents from the config seed. Keys stay. |
+| POST | `entra/rotate-keys` | Rotate the signing key |
+| POST | `entra/tenants` | Create a tenant |
+| PUT, DELETE | `entra/tenants/{tid}` | Update or delete a tenant |
+| POST | `entra/users` | Create a user |
+| PUT, DELETE | `entra/users/{tid}/{username}` | Update or delete a user |
+| DELETE | `entra/consents/{clientId}/{tid}` | Revoke a consent |
+| GET | `directory` | Login directory users |
+| POST | `directory/users`, `directory/reset` | Add or replace a user, or restore the seed |
+| DELETE | `directory/users/{username}` | Delete a user |
 
-The same admin operations are served as an MCP server at `/admin/mcp`, so an
-agent can seed tenants and users or mint tokens without hand-written HTTP calls:
+`/admin` responses carry no CORS headers, so a page on another origin cannot read them or pass
+a preflight. POST and PUT requests need `Content-Type: application/json`, or else `415`. The
+one exception is a request with neither `Content-Type` nor `Origin`, which only a non-browser
+client sends. `curl -d` sends a form content type, so add the header:
+
+```bash
+curl -X POST https://oidc.dev.test/admin/api/settings \
+  -H 'Content-Type: application/json' -d '{"name":"interactiveLogin","value":false}'
+```
+
+## MCP for AI agents
+
+`/admin/mcp` serves the same admin operations as an MCP server:
 
 ```bash
 claude mcp add --transport http mock-oidc https://oidc.dev.test/admin/mcp
 ```
 
-Tools:
+- Settings: `settings_get`, `settings_set` (`interactiveLogin`, `rotateRefreshToken`, `entra`,
+  `graph`).
+- Login directory, when one is loaded: `directory_list`, `directory_upsert_user`,
+  `directory_delete_user`, `directory_reset`.
+- Entra, when configured: `entra_get_state`, `entra_create_tenant`, `entra_update_tenant`,
+  `entra_delete_tenant`, `entra_create_user`, `entra_update_user`, `entra_delete_user`,
+  `entra_revoke_consent`, `entra_reset`, `entra_rotate_keys`, `entra_mint_token`.
 
-- Settings: `settings_get`, `settings_set` (`interactiveLogin`,
-  `rotateRefreshToken`, `entra`, `graph`).
-- Login directory, when one is loaded: `directory_list`,
-  `directory_upsert_user`, `directory_delete_user`, `directory_reset`.
-- Entra, when configured: `entra_get_state`, `entra_create_tenant`,
-  `entra_update_tenant`, `entra_delete_tenant`, `entra_create_user`,
-  `entra_update_user`, `entra_delete_user`, `entra_revoke_consent`,
-  `entra_reset`, `entra_rotate_keys`, `entra_mint_token`.
+The endpoint is Streamable HTTP, stateless, and JSON only. It serves protocol `2026-07-28` and
+the `initialize`-based versions `2025-03-26` to `2025-11-25`. Every request needs
+`Content-Type: application/json`. Like `/admin/api/`, it has no authentication and sends no CORS
+headers, so browser-based MCP clients on another origin cannot call it.
 
-Edits are in-memory, exactly like the admin UI. The endpoint is Streamable
-HTTP, stateless and JSON-only, and serves both the `2026-07-28` protocol and
-the `initialize`-based `2025-03-26` to `2025-11-25` versions. It has no
-authentication and no `Origin` check, like `/admin/api/`, because the server is
-for development and testing only. Requests need `Content-Type: application/json`.
-The `/admin` routes send no CORS headers, so a page on another origin cannot
-read them or pass a preflight. `/admin/api/` POST and PUT requests that carry
-an `Origin` header, as every browser POST does, also need that content type.
+## Entra mode
 
-## Consumer configuration
+Entra mode emulates Microsoft Entra ID v2.0 for testing multi-tenant Entra relying parties. Set
+`ENTRA_CONFIG_PATH` (compose mounts `entra-demo.json`) or add an `"entra"` block to the JSON
+config. With neither, Entra mode is off. Reference:
 
-```env
-OIDC_ISSUER_URL=https://oidc.dev.test/oidc
-OIDC_CLIENT_ID=dochub            # any value; interactive login accepts all clients
-OIDC_CLIENT_SECRET=dochub-dev-secret
-OIDC_REDIRECT_URI=http://<app-host>/api/auth/oidc/callback
-```
-
-The custom login page (`mock-oidc-login.html`) offers one-click sign-in as any
-directory user — **password field accepts any value**.
-
-## Entra mode (Microsoft Entra ID emulation)
-
-Opt-in emulation of Entra ID v2.0 for testing multi-tenant Entra relying parties
-(design: [docs/entra/00-design.md](docs/entra/00-design.md), account Graph API:
-[docs/entra/02-graph-design.md](docs/entra/02-graph-design.md)). Enabled by
-`ENTRA_CONFIG_PATH` (compose mounts `entra-demo.json`) or an `"entra"` block in
-the JSON config. With neither, the server behaves exactly as before.
+- Sign-in and tokens: [docs/entra/00-design.md](docs/entra/00-design.md)
+- Graph API, `userinfo`, and app-only tokens:
+  [docs/entra/02-graph-design.md](docs/entra/02-graph-design.md)
+- Org directory, dynamic groups, `$filter`, and claim mapping:
+  [docs/entra/04-org-directory-design.md](docs/entra/04-org-directory-design.md)
 
 | Value | Per tenant | "Sign in with Microsoft" (multi-tenant) |
 |---|---|---|
 | Authority (issuer base) | `https://oidc.dev.test/entra/{tid}/v2.0` | `https://oidc.dev.test/entra/organizations/v2.0` |
 | Discovery | `…/entra/{tid}/v2.0/.well-known/openid-configuration` | `issuer` is the template `…/entra/{tenantid}/v2.0` |
 | Token `iss` | `…/entra/{tid}/v2.0` | `…/entra/{user's tid}/v2.0` |
-| Client ID / secret | any | any |
+| Client ID and secret | any | any |
 
-Demo tenants (`entra-demo.json`): Corp `11111111-…` (group names), Customer X
-`22222222-…` (group object IDs, consent required, overage above 5 groups),
-Partner P `33333333-…` (consent required), and Org Chart `44444444-…` (org codes
-in `extensionAttribute1`, dynamic `GRP_DEPT_…` groups, a `Direct Reports for`
-group, and an `org_code` claim mapped into the `iam` app's ID token). The account
-picker needs no password.
-Users cover MFA-required (`mfa`), a simulated passkey step (`passkey`, which
-signs in with `amr` `["fido", "mfa"]`), disabled (`disabled`), overage (`many`), a
-manager chain (`leo`/`mina` report to `jane`), and tenant admins for admin
-consent (`jane`, `custadmin`, `partneradmin`).
+The demo config `entra-demo.json` has four tenants:
+
+- Corp `11111111-…` emits group names.
+- Customer X `22222222-…` emits group object IDs, requires consent, and switches to the overage
+  claim above 5 groups.
+- Partner P `33333333-…` requires consent.
+- Org Chart `44444444-…` has org codes in `extensionAttribute1`, dynamic `GRP_DEPT_…` groups, a
+  `Direct Reports for` group, and `org_code` and `department` claims mapped into the `iam`
+  app's ID token.
+
+The account picker asks for no password. Demo users cover an injected `interaction_required`
+error (`mfa`), a simulated passkey step (`passkey`, which signs in with `amr`
+`["fido", "mfa"]`), a disabled account (`disabled`), group overage (`many`), a manager chain
+(`leo` and `mina` report to `jane`), and tenant admins for admin consent (`jane`, `custadmin`,
+`partneradmin`).
 
 Admin consent: `…/entra/{tid|organizations}/v2.0/adminconsent?client_id=…&redirect_uri=…&state=…`.
 
-### Account selection without a browser
+The config loader rejects two users in one tenant with the same object ID, and two declared
+groups with the same object ID. The admin UI and MCP edits run the same check.
 
-`login_hint` naming exactly one account in scope issues the code on the GET,
-skipping the picker — which is what lets a relying-party test run headless. It
-matches a UPN, an email or the configured username:
+### Sign in without a browser
+
+A `login_hint` that names exactly one account in scope issues the code on the GET and skips the
+picker, so a relying-party test can run headless. The hint matches a UPN, an email, or the
+configured username:
 
 ```bash
 curl -si "https://oidc.dev.test/entra/11111111-1111-1111-1111-111111111111/oauth2/v2.0/authorize\
@@ -211,32 +213,30 @@ curl -si "https://oidc.dev.test/entra/11111111-1111-1111-1111-111111111111/oauth
   | grep -i location          # 302 straight to ?code=…
 ```
 
-`prompt=select_account` or `prompt=login` forces the picker anyway (the hinted
-account is marked), `"ignoreLoginHint": true` disables the shortcut, and
-`domain_hint=` narrows the `organizations`/`common` picker by tenant domain.
-`prompt=none` issues silently when the hint resolves and otherwise redirects
-`error=interaction_required` (AADSTS50058) — this mock keeps no session, so a
-resolvable hint *is* the session.
+`prompt=select_account` or `prompt=login` shows the picker anyway, with the hinted account
+marked. `"ignoreLoginHint": true` turns the shortcut off. `domain_hint=` narrows the
+`organizations` or `common` picker by tenant domain. `prompt=none` issues the code when the hint
+resolves and otherwise redirects with `error=interaction_required` (AADSTS50058). The mock keeps
+no session, so a resolvable hint stands in for one.
 
 ### Graph account API
 
-On whenever Entra mode is; `"graph": {"enabled": false}` switches it off. The
-tenant is never in the path — it comes from the caller's token, as real Graph
-scopes a response by the token's tenant — and every response is confined to it.
+Graph is on whenever Entra mode is. `"graph": {"enabled": false}` turns it off. The path never
+names the tenant. The server takes the tenant from the caller's token, as real Graph does, and
+confines every response to it.
 
 | Method | Path (under `/entra/graph`) | Returns |
 |---|---|---|
-| GET | `/v1.0/me` | the token's user |
-| GET | `/v1.0/me/memberOf`, `/transitiveMemberOf` | the user's groups |
-| GET | `/v1.0/me/manager`, `/directReports` | the manager chain |
-| POST | `/v1.0/me/getMemberObjects`, `/getMemberGroups` | group ids — **resolves group overage** |
-| GET | `/v1.0/users`, `/users/{id\|upn}` | the tenant's accounts |
-| GET | `/v1.0/users/{id}/memberOf`, `/manager`, `/directReports` | as for `/me` |
-| GET | `/v1.0/groups`, `/groups/{id}`, `/groups/{id}/members` | the tenant's groups |
-| GET/POST | `/oidc/userinfo` | OIDC claims (advertised as `userinfo_endpoint`) |
+| GET | `/v1.0/me` | The token's user |
+| GET | `/v1.0/me/memberOf`, `/transitiveMemberOf` | The user's groups |
+| GET | `/v1.0/me/manager`, `/directReports` | The manager chain |
+| POST | `/v1.0/me/getMemberObjects`, `/getMemberGroups` | Group IDs, which resolve group overage |
+| GET | `/v1.0/users`, `/users/{id or upn}` | The tenant's accounts |
+| GET | `/v1.0/users/{id}/memberOf`, `/manager`, `/directReports` | As for `/me` |
+| GET | `/v1.0/groups`, `/groups/{id}`, `/groups/{id}/members` | The tenant's groups |
+| GET, POST | `/oidc/userinfo` | OIDC claims, advertised as `userinfo_endpoint` |
 
 ```bash
-# sign in, then read the account with the access token
 AT=$(curl -s -X POST https://oidc.dev.test/entra/_entra/mint-token \
   -d tid=11111111-1111-1111-1111-111111111111 -d username=jane | jq -r .access_token)
 curl -s https://oidc.dev.test/entra/graph/v1.0/me -H "Authorization: Bearer $AT" | jq
@@ -245,52 +245,66 @@ curl -s -X POST https://oidc.dev.test/entra/graph/v1.0/me/getMemberObjects \
   -H "Authorization: Bearer $AT" -d '{"securityEnabledOnly":true}' | jq
 ```
 
-Group object IDs are the same values an `object_id` group claim carries, so a
-claim and a Graph group are one identifier. With Graph on, the overage claim's
-`_claim_sources` endpoint points **here** rather than at the real
-`graph.microsoft.com`, so a relying party can follow it inside the test
-environment (`"overageEndpoint": "microsoft"` restores Entra's URL).
+A group has one object ID everywhere: the `object_id` groups claim, Graph, and the test API all
+use the group's configured `oid`, or a derived one when none is configured. With Graph on, the
+overage claim's `_claim_sources` endpoint points at this server, not at `graph.microsoft.com`, so
+a relying party can follow it inside the test environment. `"overageEndpoint": "microsoft"`
+restores Entra's URL.
 
-Query options: `$top` (default 100, max 999), `$skiptoken`, `$select`, a
-`$filter` subset on collections (`eq`, `ne`, `in`, `startsWith`, `any`,
-`and`/`or`/`not`, e.g.
-`onPremisesExtensionAttributes/extensionAttribute1 eq 'DEPT001'`), and
-`$expand=manager` on `/me` and `/users`. `$orderby`, `$search`, `$count` and
-anything outside the subset are refused with `400 Request_UnsupportedQuery`
-rather than silently ignored.
+Graph reads need an access token that this server minted for the Graph audience. ID tokens get
+`401 InvalidAuthenticationToken`. `/me` and `userinfo` also need a delegated token. With
+`"graph": {"appOnly": true}`, `grant_type=client_credentials` on a tenant-specific path mints an
+app-only token, with roles from `apps[]` and no `oid`. That token reads `/users` and `/groups`
+and gets `403` on `/me`, like a directory-sync job. The server does not check Graph permissions:
+any valid Graph-audience token can read.
 
-Org directory ([docs/entra/04-org-directory-design.md](docs/entra/04-org-directory-design.md)):
-users carry `department`, `companyName`, `employeeId` and
-`onPremisesExtensionAttributes.extensionAttribute1-3` (`$select`-only on Graph,
-as in v1.0). A declared group with a `membershipRule`, such as
-`(user.extensionAttribute1 -eq "DEPT001")`, is a dynamic group whose members are
-recomputed on every change, so an admin-UI edit of an org code moves the user
-between groups on the next token and Graph call. `apps[].claims` maps
+Query options:
+
+- `$top` defaults to 100 and is clamped to 999. `$skiptoken` pages.
+- `$select` picks properties. An unknown property gets `400`, also inside
+  `$expand=manager($select=...)`.
+- `$filter` supports a subset on collections: `eq`, `ne`, `in`, `startsWith`, `any`, `and`,
+  `or`, and `not`, for example `onPremisesExtensionAttributes/extensionAttribute1 eq 'DEPT001'`.
+  Nesting deeper than 32 levels gets `400`.
+- `$expand=manager` works on `/me` and `/users`.
+
+`$orderby`, `$search`, `$count`, and anything outside the subset get
+`400 Request_UnsupportedQuery`. The server never ignores an option it does not support.
+
+Users carry `department`, `companyName`, `employeeId`, and
+`onPremisesExtensionAttributes.extensionAttribute1-3`. Graph returns them only through `$select`,
+as v1.0 does. A declared group with a `membershipRule`, such as
+`(user.extensionAttribute1 -eq "DEPT001")`, is a dynamic group. Its members are recomputed on
+every change, so an admin edit of an org code moves the user between groups on the next token
+and Graph call. A rule nested deeper than 32 levels fails to load. `apps[].claims` maps user
 attributes into an app's ID token.
 
-Reads need a Graph-audience access token this server minted; `/me` and
-`userinfo` additionally need a **delegated** token. With
-`"graph": {"appOnly": true}`, `grant_type=client_credentials` on a
-tenant-specific path mints an app-only token (roles from `apps[]`, no `oid`)
-that reads `/users` and `/groups` but gets `403` on `/me` — the shape of a
-directory-sync job. There is no fine-grained Graph permission enforcement: any
-valid Graph-audience token reads.
+### Test API
 
-Test helpers: `GET /entra/_entra/consents`, `POST /entra/_entra/reset`,
-`POST /entra/_entra/rotate-keys`, `GET /entra/_entra/groups?tid=…` (group name →
-object ID), `GET /entra/_entra/users?tid=…` (the directory as Graph sees it),
-`POST /entra/_entra/mint-token` (`tid`, `username`, optional `clientId`,
-`scope`) to get a usable token without driving the picker.
+All paths are under `/entra/_entra/`:
 
-Not emulated: real Conditional Access, Microsoft's UI and exact error wording,
-refresh-token redemption, implicit/hybrid flows, Graph writes, OData beyond the
-subset above, nested groups (`transitiveMemberOf` equals `memberOf`), app
-registrations, device code flow, and the Graph surface beyond accounts and
-groups.
+| Method | Path | Action |
+|---|---|---|
+| GET | `consents` | List granted consents |
+| POST | `reset` | Clear runtime consents |
+| POST | `rotate-keys` | Rotate the signing key |
+| GET | `groups?tid=…` | Map group names to object IDs |
+| GET | `users?tid=…` | The directory as Graph sees it |
+| POST | `mint-token` | Mint tokens without the picker. Takes `tid`, `username`, and optional `clientId` and `scope`. |
+
+`mint-token` refuses a disabled account or one configured with `"error": "invalid_grant"`, as the
+token endpoint does.
+
+### Not emulated
+
+Real Conditional Access, Microsoft's UI and exact error wording, refresh-token redemption,
+implicit and hybrid flows, Graph writes, OData beyond the subset above, nested groups
+(`transitiveMemberOf` equals `memberOf`), app registrations, device code flow, and Graph beyond
+accounts and groups.
 
 ## User directory
 
-`demo-users.json` is the canonical directory (mirrored in the login page).
+`demo-users.json` seeds the login directory.
 
 | Username | Name | Email | Groups |
 |---|---|---|---|
@@ -299,43 +313,49 @@ groups.
 | bob | Bob Chen | bob@demo.local | dochub-user, gitea-developers |
 | eve | Eve Santos | eve@demo.local | dochub-user, gitea-maintainers |
 | frank | Frank Wu | frank@demo.local | dochub-user, gitea-developers |
-| grace | Grace Lee | grace@demo.local | *(guest — no groups)* |
+| grace | Grace Lee | grace@demo.local | none (guest) |
 | mary | Mary Johnson | mary@acme.com | acme-employees, dochub-user, gitea-developers |
 | tim | Tim Miller | tim@acme.com | acme-employees, dochub-user, gitea-developers |
 | kevin | Kevin Park | kevin@acme.com | acme-employees, dochub-user, gitea-maintainers |
 | tom | Tom Anderson | tom@acme.com | acme-employees, dochub-user, gitea-developers |
 | mark | Mark Kim | mark@acme.com | acme-employees, dochub-user, gitea-maintainers |
 | andy | Andy Choi | andy@acme.com | platform-admins, acme-admins, dochub-admin |
+| ams-admin | AMS Admin | admin@acme.test | acme-admins |
+| ams-engineer | AMS Engineer | engineer@acme.test | acme-employees |
+| ams-customer | AMS Customer | customer@acme.test | none |
 
-### Group naming convention (standard claims only)
+### Group naming convention
 
-Tokens carry **standard OIDC claims only** — `name`, `email`, `preferred_username`, `groups`, `tid`.
-All RBAC rides the standard `groups` claim with app-prefixed names; each app maps its own prefix:
+The login page sends standard OIDC claims only: `name`, `email`, `preferred_username`, `groups`,
+and `tid`. Authorization uses the `groups` claim with app-prefixed names, and each app maps its
+own prefix:
 
 | Prefix | Consumer | Example mapping |
 |---|---|---|
-| `dochub-*` | DocHub roles | `dochub-admin` → admin, `dochub-user` → user |
-| `gitea-*` | Gitea teams | `gitea-maintainers` → maintainers team |
+| `dochub-*` | DocHub roles | `dochub-admin` to admin, `dochub-user` to user |
+| `gitea-*` | Gitea teams | `gitea-maintainers` to the maintainers team |
 | `acme-*` | Org membership | `acme-employees`, `acme-admins` |
-| `platform-*` | Platform-wide | `platform-admins` → platform admin |
+| `platform-*` | Platform-wide | `platform-admins` to platform admin |
 
-Per-project roles (owner/contributor of project X) are app data — manage them in each
-app's own DB/seed scripts, not in the IdP (identity only, same as production Azure AD).
+Per-project roles, such as owner of project X, are app data. Keep them in each app's database or
+seed scripts, not in the IdP.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | Service definition (Go build, 443 + 8088 → 8080; TLS + legacy HTTP) |
-| `docker-compose.upstream.yml` | Rollback to the upstream 6.0.2 image |
-| `mock-oidc.json` | Server config (interactive login, token callback sets `tid` on issuer `oidc`) |
-| `mock-oidc-login.html` | Custom login page with user quick-picks |
-| `demo-users.json` | Canonical demo user directory |
-| `entra-demo.json` | Entra mode demo tenants and users |
-| `cmd/mock-oidc`, `internal/`, `mockoidc.go` | The Go server (see [docs/plan](docs/plan/)) |
+| `docker-compose.yml` | Service definition: Go build, `127.0.0.1` ports 443 and 8088 to container port 8080 |
+| `docker-compose.upstream.yml` | The upstream 6.0.2 image, for comparison |
+| `mock-oidc.json` | Server config: interactive login, TLS, and a token callback that sets `tid` on issuer `oidc` |
+| `mock-oidc-login.html` | Custom login page with directory quick-picks |
+| `demo-users.json` | Login directory seed |
+| `entra-demo.json` | Entra mode demo tenants, users, and apps |
+| `cmd/mock-oidc`, `internal/`, `mockoidc.go` | The Go server |
 
 ## Consumers
 
+- **ams** (E14 OIDC SSO)
+- **iam** (Entra mode)
 - **ai-docs** (DocHub + Gitea OIDC auth source)
 - **flow-spec** (token verification middleware)
 - **signflow** (dev OIDC via `dev.sh`)
@@ -344,23 +364,28 @@ app's own DB/seed scripts, not in the IdP (identity only, same as production Azu
 ## Development
 
 ```bash
-go test ./...                       # unit + e2e suites (server on random ports)
-go run ./cmd/mock-oidc              # run locally (falls back to ./config.json or JSON_CONFIG env)
+go test ./...                       # unit and e2e suites (servers on random ports)
+go run ./cmd/mock-oidc              # run locally
 JSON_CONFIG='{"interactiveLogin":true}' SERVER_PORT=8099 go run ./cmd/mock-oidc
-docker compose -p infra-apps -f ../infra-apps/compose.yaml up -d --build mock-oidc
-                                    # rebuild and restart the shared instance
 ```
 
-Config precedence is `JSON_CONFIG` env → `JSON_CONFIG_PATH` (default
-`config.json`) → built-in default `{interactiveLogin: true}`. The JSON schema
-is the mock-oauth2-server one ([reference](docs/plan/03-config.md)).
+| Variable | Effect |
+|---|---|
+| `JSON_CONFIG` | Inline JSON config. Wins over `JSON_CONFIG_PATH`. |
+| `JSON_CONFIG_PATH` | Config file, default `config.json`. A missing file falls back to `{"interactiveLogin": true}`. |
+| `ENTRA_CONFIG_PATH` | Entra config file. Replaces an `"entra"` block in the JSON config. |
+| `USER_DIRECTORY_PATH` | Login directory file, default `./demo-users.json` when present |
+| `SERVER_PORT`, `PORT` | Listen port, default 8080 |
+| `SERVER_HOSTNAME` | Listen host, default all interfaces |
+| `LOG_LEVEL` | `debug`, `warn`, or `error`. Default `info`. |
 
-Parity tip: the behavior of any endpoint can be diffed against upstream 6.0.2
-(`docker compose -f docker-compose.upstream.yml up -d` on a spare port) —
-discovery and JWKS output should match byte-for-byte after substituting the
-host:port.
+The JSON schema is the mock-oauth2-server one ([reference](docs/plan/03-config.md)).
 
-The Go server is also an importable library for tests:
+To compare an endpoint with upstream 6.0.2, stop the shared container and run
+`docker compose -f docker-compose.upstream.yml up -d`, which publishes port 8088. Discovery and
+JWKS output match byte for byte after you substitute the host and port.
+
+The server is also a library for Go tests:
 
 ```go
 s, _ := mockoidc.New(nil)           // github.com/andychoi/mock-oidc
@@ -371,14 +396,8 @@ issuer := s.IssuerURL("default")    // point your app's OIDC client here
 
 ## Notes
 
-- `kid` in JWKS derives from the issuer path segment (`oidc`). Consumers that
-  cached an old JWKS re-fetch automatically on unknown `kid` — standard rotation
-  behavior, no action needed.
-- `tid` in tokens is `mock-tenant-id`, set by the token callback in `mock-oidc.json`.
-  Keep the callback's `issuerId` in sync with the issuer path — if it doesn't match,
-  the server silently falls back to `tid` = path segment.
-- The server was rewritten in Go (2026-09); before that it ran upstream
-  mock-oauth2-server 2.1.10 → 6.0.2 as a container. JKS keystores and the JVM
-  test-library API are not part of the Go server; everything else matches 6.0.2
-  (see the compatibility contract in [docs/plan/00-overview.md](docs/plan/00-overview.md)).
-- Keep `demo-users.json` and the login page's `U` array in sync when adding users.
+- The JWKS `kid` is the issuer path segment (`oidc`).
+- `tid` in tokens is `mock-tenant-id`, set by the token callback in `mock-oidc.json`. The
+  callback's `issuerId` must match the issuer path. Otherwise `tid` is the path segment.
+- The Go server replaced the upstream container in 2026-09. It drops JKS keystores and the JVM
+  test-library API. PKCS12 keystores and PEM pairs still work.

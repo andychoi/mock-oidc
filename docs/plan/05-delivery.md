@@ -1,5 +1,8 @@
 # 05 — Delivery, Docker & rollout
 
+> **Complete. Kept as history.** This is part of the Go rewrite plan, which shipped in 2026-09.
+> The current reference is the [README](../../README.md).
+
 Part of the [rewrite plan](00-overview.md). Covers M6 plus the repo housekeeping that lands alongside it.
 
 ## Docker

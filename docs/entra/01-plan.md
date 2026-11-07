@@ -1,5 +1,8 @@
 # Entra Mode Implementation Plan
 
+> **Complete. Kept as history.** This plan shipped Entra sign-in and tokens in 2026-09.
+> The current reference is [`00-design.md`](00-design.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add an opt-in "Entra mode" to mock-oidc that emulates Microsoft Entra ID v2.0 (multiple tenants, the multi-tenant `organizations` endpoint, a shared key set, v2.0 claims, group claims with overage, admin consent, error injection), so the IAM's Entra connector can be tested without a real Entra tenant.

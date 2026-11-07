@@ -1,5 +1,8 @@
 # 02 — Endpoints & flows (behavioral spec)
 
+> **Complete. Kept as history.** This is part of the Go rewrite plan, which shipped in 2026-09.
+> The current reference is the [README](../../README.md).
+
 Part of the [rewrite plan](00-overview.md). This is the normative spec the Go implementation must satisfy; each section cites the Kotlin source (`~/project/infra-repos/mock-oauth2-server`, package prefix `…` abbreviated). Where wording is uncertain, the parity harness ([04-testing](04-testing.md)) captures golden output from 6.0.2 and *that* is normative.
 
 ## Routing model

@@ -1,5 +1,8 @@
 # 03 — Configuration reference & migration
 
+> **Complete. Kept as history.** This is part of the Go rewrite plan, which shipped in 2026-09.
+> The current reference is the [README](../../README.md).
+
 Part of the [rewrite plan](00-overview.md). Sources: `StandaloneMockOAuth2Server.kt` (env), `OAuth2Config.kt` (schema + deserializers), `token/OAuth2TokenCallback.kt` (`RequestMappingTokenCallback`). **Goal: this repo's `mock-oidc.json` parses and behaves identically under the Go server.**
 
 ## Environment variables (standalone binary)

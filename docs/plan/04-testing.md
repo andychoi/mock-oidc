@@ -1,5 +1,8 @@
 # 04 — Testing & parity strategy
 
+> **Complete. Kept as history.** This is part of the Go rewrite plan, which shipped in 2026-09.
+> The current reference is the [README](../../README.md).
+
 Part of the [rewrite plan](00-overview.md). Principle: **port the upstream test intent, verify against upstream behavior.** Kotlin suites live in `src/test/kotlin/no/nav/security/mock/oauth2/` (cited per section).
 
 ## Layers

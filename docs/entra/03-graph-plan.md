@@ -1,5 +1,8 @@
 # Entra Mode — Account Graph API Implementation Plan
 
+> **Complete. Kept as history.** This plan shipped the Graph API in 2026-10.
+> The current reference is [`02-graph-design.md`](02-graph-design.md).
+
 **Goal:** Add an opt-in, read-only Microsoft Graph **account** surface to Entra mode
 (`/me`, `/users`, `/groups`, `memberOf`, `getMemberObjects`), an OIDC `userinfo` endpoint, a Bearer
 validator for our own access tokens, richer account fixtures, account-selection hints, and optional
