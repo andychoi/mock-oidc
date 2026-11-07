@@ -86,6 +86,10 @@ segment (`graph` by default, while Graph is on). Any other `{t}` that is not a c
 `organizations`, or `common` gets 400 `invalid_request` "AADSTS90002: Tenant '{t}' not found."
 Unknown sub-paths get 404.
 
+A JSON error body (any 400 below) goes through `routing.ErrorResponse`, which lowercases it, so
+"AADSTS90002: Tenant" arrives as "aadsts90002: tenant". Error redirects keep their case. This
+document quotes messages in their source case.
+
 ### 3.1 Discovery
 
 | Field | Tenant `{tid}` | `organizations` or `common` |
