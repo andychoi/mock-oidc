@@ -144,6 +144,9 @@ func (m *sessionManager) decrypt(jwe string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if len(iv) != gcm.NonceSize() {
+		return "", fmt.Errorf("invalid JWE iv length %d", len(iv))
+	}
 	plaintext, err := gcm.Open(nil, iv, append(ct, tag...), []byte(header))
 	if err != nil {
 		return "", err

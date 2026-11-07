@@ -68,13 +68,14 @@ func publicJWK(k *SigningKey) jsonx.Obj {
 			{Name: "n", V: base64.RawURLEncoding.EncodeToString(k.RSA.N.Bytes())},
 		}
 	}
+	size := (k.EC.Curve.Params().BitSize + 7) / 8
 	return jsonx.Obj{
 		{Name: "kty", V: "EC"},
 		{Name: "use", V: k.Use},
 		{Name: "crv", V: curveName(k.EC.Curve)},
 		{Name: "kid", V: k.Kid},
-		{Name: "x", V: base64.RawURLEncoding.EncodeToString(k.EC.X.Bytes())},
-		{Name: "y", V: base64.RawURLEncoding.EncodeToString(k.EC.Y.Bytes())},
+		{Name: "x", V: base64.RawURLEncoding.EncodeToString(k.EC.X.FillBytes(make([]byte, size)))},
+		{Name: "y", V: base64.RawURLEncoding.EncodeToString(k.EC.Y.FillBytes(make([]byte, size)))},
 		{Name: "alg", V: k.Alg},
 	}
 }
