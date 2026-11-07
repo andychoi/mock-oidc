@@ -59,10 +59,6 @@ func (u *User) MemberGroups() []string {
 // currently match.
 func (u *User) DynamicGroups() []string { return u.dynamicGroups }
 
-// MailOrEmpty is the user's mailbox address, which Graph reports as null when
-// there is none.
-func (u *User) MailOrEmpty() string { return u.Email }
-
 // mailNickname derives Graph's mailNickname from a display name: the
 // alphanumeric characters, lowercased.
 func mailNickname(name string) string {
