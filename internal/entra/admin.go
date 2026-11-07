@@ -214,7 +214,7 @@ func (h *Handler) AdminMintToken(issuerOrigin string, in MintInput) (MintedToken
 	if u == nil {
 		return MintedToken{}, fmt.Errorf("user %s in tenant %s: %w", in.Username, in.TID, ErrNotFound)
 	}
-	if !u.Enabled() || u.Error == ErrInvalidGrant {
+	if u.Disabled() {
 		return MintedToken{}, fmt.Errorf("user %s in tenant %s: %w", in.Username, in.TID, errAccountDisabled)
 	}
 	clientID := in.ClientID

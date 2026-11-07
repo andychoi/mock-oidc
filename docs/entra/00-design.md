@@ -172,8 +172,9 @@ when `offline_access` was requested. It is opaque, and the server cannot redeem 
 - `action=cancel` redirects `error=access_denied` "AADSTS65004: User declined to consent to
   access the app."
 - Any other `action` accepts. The posted user goes through checks 1 and 2 of §3.2, which answer
-  400 on failure. A user without `admin: true` gets a redirect with `error=access_denied`
-  "AADSTS90094: …". On success the server grants consent for (`client_id`, user's `tid`) and
+  400 on failure. A disabled user (`accountEnabled: false` or `error: "invalid_grant"`) gets a
+  redirect with `error=access_denied` "AADSTS50057: The user account is disabled." A user
+  without `admin: true` gets a redirect with `error=access_denied` "AADSTS90094: …". On success the server grants consent for (`client_id`, user's `tid`) and
   redirects with `admin_consent=True&tenant={tid}&state=…`, plus `scope` when sent.
 
 ### 3.5 Test API

@@ -28,6 +28,12 @@ func (u *User) Enabled() bool {
 	return u.AccountEnabled == nil || *u.AccountEnabled
 }
 
+// Disabled reports whether the account is refused at sign-in completion.
+// accountEnabled: false is the ergonomic spelling of error: "invalid_grant".
+func (u *User) Disabled() bool {
+	return !u.Enabled() || u.Error == ErrInvalidGrant
+}
+
 // PrincipalName is the user's UPN: the configured one, else the value the
 // preferred_username claim has always used (email, else username@domain,
 // else username).

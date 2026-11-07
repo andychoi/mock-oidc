@@ -50,8 +50,7 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	if t == nil || u == nil {
 		return invalidGrant("AADSTS50034: The user account does not exist in this directory.")
 	}
-	// accountEnabled: false is the ergonomic spelling of error: "invalid_grant".
-	if u.Error == ErrInvalidGrant || !u.Enabled() {
+	if u.Disabled() {
 		return invalidGrant("AADSTS50057: The user account is disabled.")
 	}
 	in := TokenInput{Origin: IssuerOrigin(req), BasePath: cfg.BasePath, GraphBase: cfg.GraphBase(),
