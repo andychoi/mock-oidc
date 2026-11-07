@@ -46,7 +46,9 @@ passes). Keep both when adding admin routes.
 - **Compatibility is a hard constraint.** Without Entra config, responses stay byte-for-byte identical
   to navikt 6.0.2 (contract C1 to C9 in `docs/plan/00-overview.md`). The one deliberate divergence
   is that `response_mode=form_post` refuses a `redirect_uri` that is not `http` or `https`
-  (`docs/plan/02-endpoints-and-flows.md`). Never edit existing tests to make new code pass.
+  (`docs/plan/02-endpoints-and-flows.md`).
+- **Never weaken or remove an existing test's assertions to make new code pass.** Moving a test to
+  a new internal API, or onto the HTTP surface, with the same assertions is fine.
 - The router matches by **path suffix** (`internal/routing`); new path families must be mounted as a
   front route with a `*` pattern, not as suffix routes.
 - Error JSON bodies are lowercased by `routing.ErrorResponse` (upstream behavior).
