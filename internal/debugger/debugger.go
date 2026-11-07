@@ -23,27 +23,22 @@ var templateFS embed.FS
 // host.
 type OwnURL func(path string) string
 
-// TrustPool resolves the server's own TLS certificate pool (nil for plain
-// HTTP); the internal token exchange then trusts exactly the server's own
-// certificate.
-type TrustPool func() *x509.CertPool
-
 // Handler serves /debugger and /debugger/callback.
 type Handler struct {
-	sessions  *sessionManager
-	ownURL    OwnURL
-	trustPool TrustPool
-	client    *http.Client
+	sessions *sessionManager
+	ownURL   OwnURL
+	client   *http.Client
 }
 
-// New builds the debugger handler.
-func New(ownURL OwnURL, trustPool TrustPool) *Handler {
-	return &Handler{
-		sessions:  newSessionManager(),
-		ownURL:    ownURL,
-		trustPool: trustPool,
-		client:    &http.Client{},
+// New builds the debugger handler. trustPool is the server's own TLS
+// certificate pool (nil for plain HTTP), so the internal token exchange trusts
+// exactly the server's own certificate.
+func New(ownURL OwnURL, trustPool *x509.CertPool) *Handler {
+	client := &http.Client{}
+	if trustPool != nil {
+		client.Transport = &http.Transport{TLSClientConfig: tlsConfigFor(trustPool)}
 	}
+	return &Handler{sessions: newSessionManager(), ownURL: ownURL, client: client}
 }
 
 // Register wires the routes into the router. Handlers catch their own errors
@@ -242,11 +237,7 @@ func (h *Handler) callback(req *oauth2.Request) routing.Response {
 		httpReq.Header.Set("Authorization", "Basic "+base64Basic(clientID, clientSecret))
 	}
 
-	client := h.client
-	if pool := h.trustPool(); pool != nil {
-		client = &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfigFor(pool)}}
-	}
-	resp, err := client.Do(httpReq)
+	resp, err := h.client.Do(httpReq)
 	if err != nil {
 		panic(err)
 	}

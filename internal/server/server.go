@@ -186,7 +186,7 @@ func (s *Server) buildRouter() *routing.Router {
 	})
 
 	if s.ownBase != nil {
-		debugger.New(s.ownURL, func() *x509.CertPool { return s.trustPool }).Register(rt)
+		debugger.New(s.ownURL, s.trustPool).Register(rt)
 	}
 	if s.config.Entra != nil {
 		eh := entra.New(s.config.Entra)
@@ -258,10 +258,6 @@ var errEntraNotConfigured = errors.New("entra mode is not configured for this se
 
 // SetOwnBase replaces the own-base resolver; call before serving starts.
 func (s *Server) SetOwnBase(fn func() string) { s.ownBase = fn }
-
-// SetTrustPool sets the server's own TLS certificate pool; call before serving
-// starts so the debugger's internal exchange trusts the server certificate.
-func (s *Server) SetTrustPool(pool *x509.CertPool) { s.trustPool = pool }
 
 // ownURL resolves the server's own URL for a path, switching wildcard binds to
 // loopback so the debugger's exchange is connectable.
