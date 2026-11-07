@@ -209,7 +209,7 @@ calls the same code.
 | `sub` | Pairwise: base64url(SHA-256(`client_id` + ":" + `oid`)), 43 characters. Stable per client, different across clients. |
 | `ver` | `"2.0"` |
 | `name` | User `name`, default the username |
-| `preferred_username` | User `email`, else `username@{first tenant domain}`, else the username |
+| `preferred_username` | User `upn`, else `email`, else `username@{first tenant domain}`, else the username |
 | `nonce` | When sent to authorize |
 | `email` | Only when the user has an email and the scope contains `email` |
 | `xms_edov` | Only when the user sets `emailVerified` |

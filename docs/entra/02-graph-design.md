@@ -107,7 +107,7 @@ it. `appOnly` is the one feature that is off by default (§8).
 | `graph.clockSkew` | 60 seconds | Leeway on `exp` and `nbf`. An explicit `0` means none. A negative value is rejected. |
 | `tenant.groups[]` | none | Group metadata: `name`, `description`, `mailNickname`, `mail`, `securityEnabled` (default `true`), `mailEnabled`, `oid`, and `membershipRule`. A configured `oid` must be a GUID, unique in the tenant, and is used in Graph and in `object_id` group claims alike. Group names that users list but nobody declares are created automatically. |
 | `user.givenName`, `surname` | none | `given_name` and `family_name` claims, and Graph fields |
-| `user.upn` | the `preferred_username` rule | Graph `userPrincipalName` and the `userinfo` `preferred_username`. Tokens keep the email-based `preferred_username` ([`00-design.md` §4.1](00-design.md#41-id-token-claims)). |
+| `user.upn` | `email`, else `username@{first tenant domain}`, else the username | Graph `userPrincipalName`, and `preferred_username` in tokens and `userinfo` ([`00-design.md` §4.1](00-design.md#41-id-token-claims)) |
 | `user.accountEnabled` | `true` | `false` shows in Graph, makes `userinfo` and Graph calls with that user's token answer 401, and fails the token endpoint with AADSTS50057 |
 | `user.jobTitle`, `officeLocation`, `businessPhones`, `mobilePhone`, `preferredLanguage` | none | Graph profile fields |
 | `user.roles` | none | `roles` claim in the ID and access tokens |

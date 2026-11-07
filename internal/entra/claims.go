@@ -76,7 +76,7 @@ func baseClaims(in TokenInput) map[string]any {
 		"sub":                PairwiseSub(in.ClientID, in.User.OID),
 		"ver":                "2.0",
 		"name":               in.User.Name,
-		"preferred_username": preferredUsername(in.Tenant, in.User),
+		"preferred_username": in.User.PrincipalName(in.Tenant),
 		"uti":                token.RandomAuthorizationCode()[:22],
 	}
 	if in.User.Email != "" && slices.Contains(in.Scopes, "email") {
