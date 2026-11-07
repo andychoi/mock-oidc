@@ -155,6 +155,9 @@ HTTP, stateless and JSON-only, and serves both the `2026-07-28` protocol and
 the `initialize`-based `2025-03-26` to `2025-11-25` versions. It has no
 authentication and no `Origin` check, like `/admin/api/`, because the server is
 for development and testing only. Requests need `Content-Type: application/json`.
+The `/admin` routes send no CORS headers, so a page on another origin cannot
+read them or pass a preflight. `/admin/api/` POST and PUT requests that carry
+an `Origin` header, as every browser POST does, also need that content type.
 
 ## Consumer configuration
 
