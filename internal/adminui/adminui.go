@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -192,12 +193,16 @@ func badRequest(err error) routing.Response {
 
 func notFound() routing.Response { return routing.NotFound("not found") }
 
-// decode parses a JSON request body into out with unknown-field rejection.
+// decode parses a JSON request body holding exactly one value into out,
+// rejecting unknown fields.
 func decode(req *oauth2.Request, out any) error {
 	dec := json.NewDecoder(strings.NewReader(req.Body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		return fmt.Errorf("invalid json body: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("invalid json body: trailing data after the object")
 	}
 	return nil
 }
