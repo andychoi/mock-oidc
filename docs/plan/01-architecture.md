@@ -1,5 +1,8 @@
 # 01 — Go architecture
 
+> **Complete. Kept as history.** This is part of the Go rewrite plan, which shipped in 2026-09.
+> The current reference is the [README](../../README.md).
+
 Part of the [rewrite plan](00-overview.md). Kotlin source paths are relative to `~/project/infra-repos/mock-oauth2-server`; package prefix `no.nav.security.mock.oauth2` abbreviated `…`.
 
 ## Shape: library + command

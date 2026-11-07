@@ -1,5 +1,8 @@
 # 00 — Overview: rewriting mock-oauth2-server in Go
 
+> **Complete. Kept as history.** The Go rewrite shipped in 2026-09. The current reference is the [README](../../README.md).
+> The C1 to C9 contract below still holds, except the `form_post` divergence in [02](02-endpoints-and-flows.md).
+
 Status: draft plan · 2026-09-25
 Companion docs: [01-architecture](01-architecture.md) · [02-endpoints-and-flows](02-endpoints-and-flows.md) · [03-config](03-config.md) · [04-testing](04-testing.md) · [05-delivery](05-delivery.md)
 
