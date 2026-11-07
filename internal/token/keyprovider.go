@@ -32,6 +32,9 @@ var supportedAlgorithms = map[string]string{
 	"ES384": "EC",
 }
 
+// ecCurves is the curve each ES* algorithm signs with (RFC 7518 3.4).
+var ecCurves = map[string]elliptic.Curve{"ES256": elliptic.P256(), "ES384": elliptic.P384()}
+
 // AlgorithmFamily returns "RSA" or "EC" for a supported algorithm.
 func AlgorithmFamily(alg string) (string, error) {
 	fam, ok := supportedAlgorithms[alg]
@@ -104,6 +107,9 @@ func NewKeyProviderFromInitial(key *SigningKey, algorithm string) (*KeyProvider,
 	if key.Kty != family {
 		return nil, fmt.Errorf("initial key type %s does not match algorithm %s (family %s)", key.Kty, algorithm, family)
 	}
+	if want := ecCurves[algorithm]; family == "EC" && key.EC.Curve != want {
+		return nil, fmt.Errorf("initial key curve %s does not match algorithm %s (want %s)", curveName(key.EC.Curve), algorithm, curveName(want))
+	}
 	return &KeyProvider{initial: []*SigningKey{key}, alg: algorithm, family: family}, nil
 }
 
@@ -137,14 +143,7 @@ func (p *KeyProvider) keyFromPoolOrNew(issuerID string) *SigningKey {
 
 func generateKey(issuerID, alg, family string) *SigningKey {
 	if family == "EC" {
-		var curve elliptic.Curve
-		switch alg {
-		case "ES256":
-			curve = elliptic.P256()
-		case "ES384":
-			curve = elliptic.P384()
-		}
-		key, _ := ecdsa.GenerateKey(curve, rand.Reader)
+		key, _ := ecdsa.GenerateKey(ecCurves[alg], rand.Reader)
 		return &SigningKey{Kty: "EC", Kid: issuerID, Alg: alg, Use: "sig", EC: key}
 	}
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
