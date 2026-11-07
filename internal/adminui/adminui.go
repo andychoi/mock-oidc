@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/andychoi/mock-oidc/internal/config"
@@ -123,7 +124,9 @@ func (a *Handler) Handle(req *oauth2.Request) routing.Response {
 	if req.Method == http.MethodOptions {
 		return routing.Response{Status: http.StatusNoContent, Header: http.Header{}}
 	}
-	trimmed := strings.Trim(req.URL.Path, "/")
+	// The escaped path keeps an encoded "/" inside a name's segment; api
+	// unescapes each segment after splitting.
+	trimmed := strings.Trim(req.URL.EscapedPath(), "/")
 	rest := strings.TrimPrefix(trimmed, "admin")
 	rest = strings.TrimPrefix(rest, "/")
 	if rest == "mcp" {
@@ -211,6 +214,11 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 	get, post := req.Method == http.MethodGet, req.Method == http.MethodPost
 	put, del := req.Method == http.MethodPut, req.Method == http.MethodDelete
 	segs := strings.Split(action, "/")
+	for i, seg := range segs {
+		if v, err := url.PathUnescape(seg); err == nil {
+			segs[i] = v
+		}
+	}
 
 	switch {
 	// --- settings ---

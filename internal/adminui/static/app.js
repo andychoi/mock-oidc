@@ -477,7 +477,7 @@
         if (!window.confirm('Delete tenant ' + t.name + ' (' + t.tid + ')?\nIts users (' +
           entra.users.filter((u) => u.tid === t.tid).length + ') and consents are deleted with it.')) return;
         try {
-          await api('entra/tenants/' + t.tid, DEL);
+          await api('entra/tenants/' + encodeURIComponent(t.tid), DEL);
           toast('Tenant deleted');
           await reload();
         } catch (err) { toast(err.message, true); }
@@ -503,7 +503,7 @@
     ], isNew ? 'Create tenant' : 'Save', async (v) => {
       v.groups = parseGroupsJSON(v.groups);
       if (isNew) await api('entra/tenants', POSTJSON(v));
-      else await api('entra/tenants/' + t.tid, PUT(v));
+      else await api('entra/tenants/' + encodeURIComponent(t.tid), PUT(v));
       toast(isNew ? 'Tenant created' : 'Tenant saved');
       await reload();
     });
@@ -572,7 +572,7 @@
       del.addEventListener('click', async () => {
         if (!window.confirm('Delete user ' + u.username + ' from tenant ' + u.tid + '?')) return;
         try {
-          await api('entra/users/' + u.tid + '/' + encodeURIComponent(u.username), DEL);
+          await api('entra/users/' + encodeURIComponent(u.tid) + '/' + encodeURIComponent(u.username), DEL);
           toast('User deleted');
           await reload();
         } catch (err) { toast(err.message, true); }
@@ -642,7 +642,7 @@
         delete v['extensionAttribute' + n];
       }
       if (isNew) await api('entra/users', POSTJSON(v));
-      else await api('entra/users/' + u.tid + '/' + encodeURIComponent(u.username), PUT(v));
+      else await api('entra/users/' + encodeURIComponent(u.tid) + '/' + encodeURIComponent(u.username), PUT(v));
       toast(isNew ? 'User created' : 'User saved');
       await reload();
     });
@@ -680,7 +680,7 @@
       const del = add(act, iconBtn('trash', 'Revoke consent', true));
       del.addEventListener('click', async () => {
         try {
-          await api('entra/consents/' + encodeURIComponent(c.clientId) + '/' + c.tid, DEL);
+          await api('entra/consents/' + encodeURIComponent(c.clientId) + '/' + encodeURIComponent(c.tid), DEL);
           toast('Consent revoked');
           await reload();
         } catch (err) { toast(err.message, true); }
