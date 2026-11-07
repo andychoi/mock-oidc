@@ -3,6 +3,7 @@ package entra
 import (
 	"embed"
 	"html/template"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -233,7 +234,7 @@ func renderPasskey(p passkeyPage) routing.Response {
 	return routing.HTML(b.String())
 }
 
-func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
+func (h *Handler) authorize(req *oauth2.Request, sc scope) routing.Response {
 	ar, oerr := oauth2.ParseAuthRequest(req.URL.Query())
 	if oerr != nil {
 		return routing.ErrorResponse(oerr)
@@ -244,6 +245,13 @@ func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
 	if rm := ar.ResponseMode; rm != "" && rm != "query" {
 		return unsupportedResponseMode(rm)
 	}
+	if req.Method == http.MethodPost {
+		return h.authorizePost(req, sc, ar)
+	}
+	return h.authorizeGet(req, sc, ar)
+}
+
+func (h *Handler) authorizeGet(req *oauth2.Request, sc scope, ar *oauth2.AuthRequest) routing.Response {
 	cfg := h.conf()
 	hints := readHints(req)
 	// A login_hint naming exactly one account stands in for a session: it is
@@ -268,17 +276,7 @@ func (h *Handler) authorizeGet(req *oauth2.Request, sc scope) routing.Response {
 		Submit: "signin", Hint: hints.LoginHint, Tenants: h.pickerTenants(cfg, sc, hints)})
 }
 
-func (h *Handler) authorizePost(req *oauth2.Request, sc scope) routing.Response {
-	ar, oerr := oauth2.ParseAuthRequest(req.URL.Query())
-	if oerr != nil {
-		return routing.ErrorResponse(oerr)
-	}
-	if !ar.ImpliesCodeFlow() {
-		return unsupportedResponseType(ar)
-	}
-	if rm := ar.ResponseMode; rm != "" && rm != "query" {
-		return unsupportedResponseMode(rm)
-	}
+func (h *Handler) authorizePost(req *oauth2.Request, sc scope, ar *oauth2.AuthRequest) routing.Response {
 	cfg := h.conf()
 	_, u, oerr := h.postedUser(req, sc, cfg)
 	if oerr != nil {

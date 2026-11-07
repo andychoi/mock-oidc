@@ -91,10 +91,8 @@ func (h *Handler) route(req *oauth2.Request, sc scope, rest string) routing.Resp
 		return h.discovery(req, sc)
 	case get && rest == "discovery/v2.0/keys":
 		return routing.JSONString(h.keys.JWKS())
-	case get && rest == "oauth2/v2.0/authorize":
-		return h.authorizeGet(req, sc)
-	case post && rest == "oauth2/v2.0/authorize":
-		return h.authorizePost(req, sc)
+	case (get || post) && rest == "oauth2/v2.0/authorize":
+		return h.authorize(req, sc)
 	case post && rest == "oauth2/v2.0/token":
 		return h.token(req, sc)
 	case get && rest == "v2.0/adminconsent":
