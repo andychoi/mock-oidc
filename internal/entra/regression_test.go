@@ -280,3 +280,18 @@ func TestAdminConsentRefusesDisabledAdmin(t *testing.T) {
 		t.Errorf("consents = %s, want no grant for newapp", consents.Body)
 	}
 }
+
+// A configured upn is the user's sign-in name everywhere, tokens included.
+func TestTokensCarryConfiguredUPN(t *testing.T) {
+	h := New(mustConfig(t, `{"tenants": [{"tid": "`+tidOne+`", "domains": ["corp.test"]}],
+	  "users": [{"username": "jane", "tid": "`+tidOne+`", "email": "jane@mail.test", "upn": "jane.doe@corp.test"}]}`))
+	tok, err := h.AdminMintToken("http://mock.test", MintInput{TID: tidOne, Username: "jane"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, jwt := range map[string]string{"id_token": tok.IDToken, "access_token": tok.AccessToken} {
+		if got := jwtClaims(t, jwt)["preferred_username"]; got != "jane.doe@corp.test" {
+			t.Errorf("%s preferred_username = %v, want the upn", name, got)
+		}
+	}
+}
