@@ -3,6 +3,7 @@ package entra
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -100,42 +101,63 @@ func TestCollectionSkipPastEndIsEmpty(t *testing.T) {
 }
 
 func TestSelectKeepsIDAndRejectsUnknownProperty(t *testing.T) {
-	entity := jsonx.Obj{
-		{Name: "@odata.context", V: "ctx"},
-		{Name: "id", V: "u1"},
-		{Name: "displayName", V: "Jane"},
-		{Name: "mail", V: nil},
+	h := graphHandler(t)
+	bearer := graphToken(t, h, tidA, "jane")
+	me := func(sel string) routing.Response {
+		return callGraph(t, h, http.MethodGet, "/v1.0/me?$select="+url.QueryEscape(sel), bearer, "")
 	}
-	got, gerr := applySelect(entity, "displayName", typeUser)
-	if gerr != nil {
-		t.Fatalf("select: %+v", gerr)
+	resp := me("displayName")
+	if resp.Status != http.StatusOK {
+		t.Fatalf("select: %d %s", resp.Status, resp.Body)
 	}
-	names := []string{}
-	for _, f := range got {
-		names = append(names, f.Name)
-	}
-	if strings.Join(names, ",") != "@odata.context,id,displayName" {
+	if names := topLevelKeys(t, resp.Body); strings.Join(names, ",") != "@odata.context,id,displayName" {
 		t.Errorf("selected = %v, want the context, id and displayName", names)
 	}
 	// Case-insensitive, like OData.
-	if _, gerr := applySelect(entity, "DISPLAYNAME, mail", typeUser); gerr != nil {
-		t.Errorf("case-insensitive select: %+v", gerr)
+	if resp := me("DISPLAYNAME, mail"); resp.Status != http.StatusOK {
+		t.Errorf("case-insensitive select: %d %s", resp.Status, resp.Body)
 	}
 	// An empty $select is not a filter at all.
-	if got, _ := applySelect(entity, "  ", typeUser); len(got) != len(entity) {
+	full := callGraph(t, h, http.MethodGet, "/v1.0/me", bearer, "")
+	if blank := me("  "); blank.Status != http.StatusOK || blank.Body != full.Body {
 		t.Error("a blank $select must keep everything")
 	}
-	_, gerr = applySelect(entity, "displayName,nope", typeUser)
-	if gerr == nil || gerr.Status != http.StatusBadRequest || gerr.Code != CodeUnsupportedQuery {
-		t.Fatalf("unknown property error = %+v", gerr)
+	_, body := graphGet(t, h, "/v1.0/me?$select="+url.QueryEscape("displayName,nope"), bearer)
+	if code := graphErrCode(t, body); code != CodeUnsupportedQuery {
+		t.Fatalf("unknown property error code = %q", code)
 	}
-	if !strings.Contains(gerr.Message, "'nope'") || !strings.Contains(gerr.Message, typeUser) {
-		t.Errorf("message = %q", gerr.Message)
+	if msg, _ := body["error"].(map[string]any)["message"].(string); !strings.Contains(msg, "'nope'") || !strings.Contains(msg, typeUser) {
+		t.Errorf("message = %q", msg)
+	}
+	if resp := me("displayName,nope"); resp.Status != http.StatusBadRequest {
+		t.Errorf("unknown property status = %d", resp.Status)
 	}
 	// The context is not a selectable property.
-	if _, gerr := applySelect(entity, "@odata.context", typeUser); gerr == nil {
+	if resp := me("@odata.context"); resp.Status != http.StatusBadRequest {
 		t.Error("@odata.context must not be selectable")
 	}
+}
+
+// topLevelKeys lists a JSON object's keys in document order.
+func topLevelKeys(t *testing.T, body string) []string {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(body))
+	if _, err := dec.Token(); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, k.(string))
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return keys
 }
 
 // Graph error codes are PascalCase; routing.ErrorResponse lowercases whole

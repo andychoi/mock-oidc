@@ -165,16 +165,6 @@ func (c *Config) nextLink(req *oauth2.Request, nextSkip int) string {
 	return IssuerOrigin(req) + req.URL.Path + "?" + strings.Join(parts, "&")
 }
 
-// applySelect narrows entity to the requested properties, checking $select
-// against entity's own properties.
-func applySelect(entity jsonx.Obj, raw, odataType string) (jsonx.Obj, *graphError) {
-	keep, gerr := selection(entity, raw, odataType)
-	if gerr != nil {
-		return nil, gerr
-	}
-	return project(entity, keep, odataType), nil
-}
-
 // routeSelection resolves a route's $select against every property of
 // odataType, plus manager when the route expanded it. Checking the schema
 // instead of each row keeps $select=manager valid for a user without one.
