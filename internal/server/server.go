@@ -335,6 +335,12 @@ func (s *Server) authorizePost(req *oauth2.Request) routing.Response {
 // authenticationSuccess mints the code and renders the 302 (or form_post
 // auto-submit page) carrying code and state.
 func (s *Server) authenticationSuccess(req *oauth2.Request, ar *oauth2.AuthRequest, lg *login.Login) routing.Response {
+	// Deliberate divergence from navikt: the form_post page auto-submits to
+	// redirect_uri on this server's origin, so a javascript: or data: URI
+	// would run script there.
+	if ar.ResponseMode == "form_post" && !isHTTPURL(ar.RedirectURI) {
+		panic(oauth2.InvalidRequest("invalid request: response_mode=form_post requires an http or https redirect_uri"))
+	}
 	code, oerr := s.authCode.AuthorizationCodeResponse(ar, lg)
 	if oerr != nil {
 		panic(oerr)
@@ -347,6 +353,11 @@ func (s *Server) authenticationSuccess(req *oauth2.Request, ar *oauth2.AuthReque
 		panic(oerr)
 	}
 	return routing.Redirect(location)
+}
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
 
 func (s *Server) token(req *oauth2.Request) routing.Response {

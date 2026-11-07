@@ -93,7 +93,7 @@ Source: `OAuth2HttpRequestHandler.authorization()`, `grant/AuthorizationCodeHand
 
 1. Parse as an OIDC `AuthenticationRequest` (missing required params → `invalid_request`).
 2. If `interactiveLogin` config is on **or** `prompt` contains `login|consent|select_account` → **200 HTML** login page (custom `loginPagePath` file served as-is with the form target being the current URL; else built-in template). No client validation of any kind.
-3. Else → immediate `302` to `redirect_uri?code=<code>&state=<state>` (state only if provided). `response_mode=form_post` → 200 auto-submitting HTML form instead of redirect.
+3. Else → immediate `302` to `redirect_uri?code=<code>&state=<state>` (state only if provided). `response_mode=form_post` → 200 auto-submitting HTML form instead of redirect. **Deliberate divergence:** with `form_post`, a `redirect_uri` whose scheme is not `http` or `https` fails with `400 invalid_request` before a code is minted, because the auto-submitting form would otherwise run a `javascript:` or `data:` URI on this server's origin.
 
 **POST `/authorize`** (login submit; form fields `username` + optional `claims` JSON string; auth params carried in the original query string):
 
