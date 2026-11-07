@@ -124,29 +124,17 @@ func renderArr(b *strings.Builder, arr Arr, level int) {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		if obj, ok := e.(Obj); ok {
-			// Object elements keep their opening brace on the bracket line and
-			// indent fields one level deeper than the array's own level:
-			// "keys" : [ {
-			//   "kty" : ...
-			// } ]
-			b.WriteString("{\n")
-			inner := strings.Repeat(indentUnit, level+1)
-			for j, f := range obj {
-				if j > 0 {
-					b.WriteString(",\n")
-				}
-				b.WriteString(inner)
-				b.WriteString(Quote(f.Name))
-				b.WriteString(" : ")
-				renderValue(b, f.V, level+1)
-			}
-			b.WriteString("\n")
-			b.WriteString(strings.Repeat(indentUnit, level))
-			b.WriteString("}")
-		} else if m, ok := e.(map[string]any); ok {
-			renderArr(b, Arr{FromMap(m)}, level)
-		} else {
+		// Object elements keep their opening brace on the bracket line and
+		// indent fields one level deeper than the array's own level:
+		// "keys" : [ {
+		//   "kty" : ...
+		// } ]
+		switch t := e.(type) {
+		case Obj:
+			renderObj(b, t, level)
+		case map[string]any:
+			renderObj(b, FromMap(t), level)
+		default:
 			renderValue(b, e, level+1)
 		}
 	}
