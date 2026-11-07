@@ -3,6 +3,7 @@
 package grant
 
 import (
+	"encoding/base64"
 	"sync"
 
 	"github.com/andychoi/mock-oidc/internal/token"
@@ -66,6 +67,6 @@ func (m *RefreshTokenManager) Rotate(refreshToken string, fallback token.Callbac
 // trailing empty-signature dot.
 func plainJWT(jti, nonce string) string {
 	return "eyJhbGciOiJub25lIn0." +
-		b64url(`{"jti":"`+jti+`","nonce":"`+nonce+`"}`) +
+		base64.RawURLEncoding.EncodeToString([]byte(`{"jti":"`+jti+`","nonce":"`+nonce+`"}`)) +
 		"."
 }
