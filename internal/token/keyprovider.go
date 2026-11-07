@@ -78,7 +78,14 @@ func NewKeyProvider(initialKeySet []byte, algorithm string) (*KeyProvider, error
 		if err != nil {
 			return nil, err
 		}
-		p.initial = keys
+		// Upstream generates keys for the algorithm's own curve; a pool key
+		// that cannot sign with the algorithm (the P-256 pool under ES384)
+		// would mint unverifiable tokens, so skip it and generate instead.
+		for _, k := range keys {
+			if k.Kty == family && (family != "EC" || k.EC.Curve == ecCurves[algorithm]) {
+				p.initial = append(p.initial, k)
+			}
+		}
 	}
 	return p, nil
 }
