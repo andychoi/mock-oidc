@@ -17,6 +17,12 @@ import (
 //go:embed templates/debugger.html.tmpl templates/debugger_callback.html.tmpl templates/error.html.tmpl
 var templateFS embed.FS
 
+var (
+	formTmpl     = template.Must(template.ParseFS(templateFS, "templates/debugger.html.tmpl"))
+	callbackTmpl = template.Must(template.ParseFS(templateFS, "templates/debugger_callback.html.tmpl"))
+	errorTmpl    = template.Must(template.ParseFS(templateFS, "templates/error.html.tmpl"))
+)
+
 // OwnURL resolves the server's own bound URL for a path (httpServer.url(path)):
 // the base the server actually listens on, switched to loopback for wildcard
 // binds, so the debugger's token exchange never targets a client-controlled
@@ -66,16 +72,12 @@ func (h *Handler) errorResponse(req *oauth2.Request, rec any) routing.Response {
 	if err, ok := rec.(error); ok {
 		message = err.Error()
 	}
-	tmpl, terr := template.ParseFS(templateFS, "templates/error.html.tmpl")
-	if terr != nil {
-		return routing.HTML("debugger error: " + message)
-	}
 	var body strings.Builder
 	data := map[string]string{
 		"debugger_url": req.EndpointURL(oauth2.Debugger),
 		"stacktrace":   message,
 	}
-	if terr := tmpl.Execute(&body, data); terr != nil {
+	if terr := errorTmpl.Execute(&body, data); terr != nil {
 		return routing.HTML("debugger error: " + message)
 	}
 	resp := routing.Response{Status: 500, Header: http.Header{}}
@@ -100,12 +102,8 @@ func (h *Handler) form(req *oauth2.Request) routing.Response {
 
 	authorizeURL := req.EndpointURL(oauth2.Authorization) + "?" + prefill.Encode()
 
-	tmpl, err := template.ParseFS(templateFS, "templates/debugger.html.tmpl")
-	if err != nil {
-		panic(err)
-	}
 	var body strings.Builder
-	err = tmpl.Execute(&body, map[string]any{
+	err := formTmpl.Execute(&body, map[string]any{
 		"authorize_url":      authorizeURL,
 		"token_url":          req.EndpointURL(oauth2.Token),
 		"client_auth_method": "CLIENT_SECRET_BASIC",
@@ -249,12 +247,8 @@ func (h *Handler) callback(req *oauth2.Request) routing.Response {
 
 	dump := tokenRequestDump(tokenURL, authMethod, clientID, clientSecret, body)
 
-	tmpl, err := template.ParseFS(templateFS, "templates/debugger_callback.html.tmpl")
-	if err != nil {
-		panic(err)
-	}
 	var html strings.Builder
-	if err := tmpl.Execute(&html, map[string]string{
+	if err := callbackTmpl.Execute(&html, map[string]string{
 		"token_request":  dump,
 		"token_response": string(respBody),
 	}); err != nil {

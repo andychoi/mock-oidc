@@ -17,6 +17,8 @@ import (
 //go:embed templates/login.html.tmpl
 var builtinTemplates embed.FS
 
+var loginTmpl = template.Must(template.ParseFS(builtinTemplates, "templates/login.html.tmpl"))
+
 // Login is the submitted login (username + optional claims JSON string).
 type Login struct {
 	Username string
@@ -52,12 +54,8 @@ func (h *Handler) LoginSubmit(req *oauth2.Request) (Login, *oauth2.Error) {
 }
 
 func (h *Handler) builtinLoginHTML(req *oauth2.Request) (string, *oauth2.Error) {
-	tmpl, err := template.ParseFS(builtinTemplates, "templates/login.html.tmpl")
-	if err != nil {
-		return "", oauth2.ServerError(fmt.Sprintf("login template: %v", err))
-	}
 	var buf strings.Builder
-	if err := tmpl.Execute(&buf, queryParams(req.URL.RawQuery)); err != nil {
+	if err := loginTmpl.Execute(&buf, queryParams(req.URL.RawQuery)); err != nil {
 		return "", oauth2.ServerError(fmt.Sprintf("login template: %v", err))
 	}
 	return buf.String(), nil
