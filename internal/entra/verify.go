@@ -195,7 +195,7 @@ func (h *Handler) ValidateAccessToken(req *oauth2.Request, cfg *Config, bearer s
 	}
 	// A user deleted or disabled between mint and call loses the token with it.
 	u := cfg.UserByOID(tid, c.OID)
-	if u == nil || !u.Enabled() {
+	if u == nil || u.Disabled() {
 		return nil, invalidToken()
 	}
 	c.User = u
