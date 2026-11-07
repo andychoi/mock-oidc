@@ -58,14 +58,7 @@ func main() {
 
 	var tlsSetup *httpserver.TLS
 	if cfg.SSL != nil {
-		tlsSetup, err = httpserver.NewTLS(httpserver.Options{
-			KeyPassword:      cfg.SSL.KeyPassword,
-			KeystoreFile:     cfg.SSL.KeystoreFile,
-			KeystoreType:     cfg.SSL.KeystoreType,
-			KeystorePassword: cfg.SSL.KeystorePassword,
-			CertFile:         cfg.SSL.CertificateFile,
-			KeyFile:          cfg.SSL.PrivateKeyFile,
-		})
+		tlsSetup, err = httpserver.NewTLS(httpserver.Options(*cfg.SSL))
 		if err != nil {
 			slog.Error("failed to configure TLS", "error", err)
 			os.Exit(1)
