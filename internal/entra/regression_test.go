@@ -130,3 +130,23 @@ func TestGraphFilterNestingIsCapped(t *testing.T) {
 		t.Fatalf("32 levels: status %d body %v", status, body)
 	}
 }
+
+func TestMembershipRuleNestingIsCapped(t *testing.T) {
+	const leaf = `user.department -eq \"HR\"`
+	config := func(rule string) string {
+		return `{"tenants": [{"tid": "` + tidOne + `", "groups": [{"name": "HR", "membershipRule": "` + rule + `"}]}]}`
+	}
+	for name, rule := range map[string]string{
+		"parens": strings.Repeat("(", 10000) + leaf + strings.Repeat(")", 10000),
+		"not":    strings.Repeat("-not ", 10000) + leaf,
+	} {
+		_, err := ParseConfig([]byte(config(rule)))
+		if err == nil || !strings.Contains(err.Error(), "nested too deeply") {
+			t.Errorf("%s: err = %.200v, want a nesting error", name, err)
+		}
+	}
+	shallow := strings.Repeat("(", 32) + leaf + strings.Repeat(")", 32)
+	if _, err := ParseConfig([]byte(config(shallow))); err != nil {
+		t.Errorf("32 levels: %v", err)
+	}
+}
