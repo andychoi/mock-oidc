@@ -17,33 +17,34 @@ import (
 //go:embed templates/debugger.html.tmpl templates/debugger_callback.html.tmpl templates/error.html.tmpl
 var templateFS embed.FS
 
-// OwnURL resolves the server's own bound URL for a path (httpServer.url(path)):
-// the base the server actually listens on, switched to loopback for wildcard
-// binds, so the debugger's token exchange never targets a client-controlled
-// host.
-type OwnURL func(path string) string
+var (
+	formTmpl     = template.Must(template.ParseFS(templateFS, "templates/debugger.html.tmpl"))
+	callbackTmpl = template.Must(template.ParseFS(templateFS, "templates/debugger_callback.html.tmpl"))
+	errorTmpl    = template.Must(template.ParseFS(templateFS, "templates/error.html.tmpl"))
+)
 
-// TrustPool resolves the server's own TLS certificate pool (nil for plain
-// HTTP); the internal token exchange then trusts exactly the server's own
-// certificate.
-type TrustPool func() *x509.CertPool
+// OwnBase resolves the server's own bound base URL (httpServer.url): the
+// address the server actually listens on, with wildcard binds already switched
+// to loopback, so the debugger's token exchange never targets a
+// client-controlled host.
+type OwnBase func() string
 
 // Handler serves /debugger and /debugger/callback.
 type Handler struct {
-	sessions  *sessionManager
-	ownURL    OwnURL
-	trustPool TrustPool
-	client    *http.Client
+	sessions *sessionManager
+	ownBase  OwnBase
+	client   *http.Client
 }
 
-// New builds the debugger handler.
-func New(ownURL OwnURL, trustPool TrustPool) *Handler {
-	return &Handler{
-		sessions:  newSessionManager(),
-		ownURL:    ownURL,
-		trustPool: trustPool,
-		client:    &http.Client{},
+// New builds the debugger handler. trustPool is the server's own TLS
+// certificate pool (nil for plain HTTP), so the internal token exchange trusts
+// exactly the server's own certificate.
+func New(ownBase OwnBase, trustPool *x509.CertPool) *Handler {
+	client := &http.Client{}
+	if trustPool != nil {
+		client.Transport = &http.Transport{TLSClientConfig: tlsConfigFor(trustPool)}
 	}
+	return &Handler{sessions: newSessionManager(), ownBase: ownBase, client: client}
 }
 
 // Register wires the routes into the router. Handlers catch their own errors
@@ -71,16 +72,12 @@ func (h *Handler) errorResponse(req *oauth2.Request, rec any) routing.Response {
 	if err, ok := rec.(error); ok {
 		message = err.Error()
 	}
-	tmpl, terr := template.ParseFS(templateFS, "templates/error.html.tmpl")
-	if terr != nil {
-		return routing.HTML("debugger error: " + message)
-	}
 	var body strings.Builder
 	data := map[string]string{
 		"debugger_url": req.EndpointURL(oauth2.Debugger),
 		"stacktrace":   message,
 	}
-	if terr := tmpl.Execute(&body, data); terr != nil {
+	if terr := errorTmpl.Execute(&body, data); terr != nil {
 		return routing.HTML("debugger error: " + message)
 	}
 	resp := routing.Response{Status: 500, Header: http.Header{}}
@@ -105,12 +102,8 @@ func (h *Handler) form(req *oauth2.Request) routing.Response {
 
 	authorizeURL := req.EndpointURL(oauth2.Authorization) + "?" + prefill.Encode()
 
-	tmpl, err := template.ParseFS(templateFS, "templates/debugger.html.tmpl")
-	if err != nil {
-		panic(err)
-	}
 	var body strings.Builder
-	err = tmpl.Execute(&body, map[string]any{
+	err := formTmpl.Execute(&body, map[string]any{
 		"authorize_url":      authorizeURL,
 		"token_url":          req.EndpointURL(oauth2.Token),
 		"client_auth_method": "CLIENT_SECRET_BASIC",
@@ -180,7 +173,7 @@ func (h *Handler) callback(req *oauth2.Request) routing.Response {
 	session := h.sessions.session(req)
 
 	tokenEndpointURL := req.EndpointURL(oauth2.Token)
-	targetURL := h.ownURL(tokenEndpointPath(req.IssuerID()))
+	targetURL := h.ownBase() + tokenEndpointPath(req.IssuerID())
 
 	code := req.QueryParam("code")
 	if code == "" {
@@ -242,11 +235,7 @@ func (h *Handler) callback(req *oauth2.Request) routing.Response {
 		httpReq.Header.Set("Authorization", "Basic "+base64Basic(clientID, clientSecret))
 	}
 
-	client := h.client
-	if pool := h.trustPool(); pool != nil {
-		client = &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfigFor(pool)}}
-	}
-	resp, err := client.Do(httpReq)
+	resp, err := h.client.Do(httpReq)
 	if err != nil {
 		panic(err)
 	}
@@ -258,12 +247,8 @@ func (h *Handler) callback(req *oauth2.Request) routing.Response {
 
 	dump := tokenRequestDump(tokenURL, authMethod, clientID, clientSecret, body)
 
-	tmpl, err := template.ParseFS(templateFS, "templates/debugger_callback.html.tmpl")
-	if err != nil {
-		panic(err)
-	}
 	var html strings.Builder
-	if err := tmpl.Execute(&html, map[string]string{
+	if err := callbackTmpl.Execute(&html, map[string]string{
 		"token_request":  dump,
 		"token_response": string(respBody),
 	}); err != nil {

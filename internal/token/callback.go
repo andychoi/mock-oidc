@@ -3,6 +3,7 @@ package token
 import (
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/andychoi/mock-oidc/internal/oauth2"
 )
@@ -88,20 +89,28 @@ type Mapping struct {
 	Claims       map[string]any
 	TypeHeader   string
 
+	regexOnce  sync.Once
 	matchRegex *regexp.Regexp
-	regexTried bool
 }
 
+// regex returns Match compiled to match an entire value (Kotlin matchEntire),
+// or nil when Match is "*" or not a valid regex (exact matching only, like
+// upstream). The original is compiled first because wrapping can turn an
+// invalid pattern such as ")(" into a valid one.
 func (m *Mapping) regex() *regexp.Regexp {
-	if !m.regexTried {
-		m.regexTried = true
-		if m.Match != "*" {
-			if re, err := regexp.Compile(m.Match); err == nil {
-				m.matchRegex = re
-			}
-			// invalid regex: exact-string matching only, like upstream
+	m.regexOnce.Do(func() {
+		if m.Match == "*" {
+			return
 		}
-	}
+		re, err := regexp.Compile(m.Match)
+		if err != nil {
+			return
+		}
+		if anchored, err := regexp.Compile(`\A(?:` + m.Match + `)\z`); err == nil {
+			re = anchored
+		}
+		m.matchRegex = re
+	})
 	return m.matchRegex
 }
 
@@ -120,21 +129,11 @@ func (m *Mapping) isMatch(form map[string][]string, req *oauth2.TokenRequest, ex
 		if m.Match == "*" || m.Match == v {
 			return true
 		}
-		if re := m.regex(); re != nil && anchored(re).MatchString(v) {
+		if re := m.regex(); re != nil && re.MatchString(v) {
 			return true
 		}
 	}
 	return false
-}
-
-// anchored wraps a compiled regex so it matches the entire value,
-// equivalent to Kotlin matchEntire.
-func anchored(re *regexp.Regexp) *regexp.Regexp {
-	pattern := `\A(?:` + re.String() + `)\z`
-	if wrapped, err := regexp.Compile(pattern); err == nil {
-		return wrapped
-	}
-	return re
 }
 
 // MappingCallback mirrors RequestMappingTokenCallback: per-issuer list of
@@ -202,7 +201,7 @@ func (c *MappingCallback) TypeHeader(req *oauth2.TokenRequest) string {
 
 func (c *MappingCallback) Audience(req *oauth2.TokenRequest) []string {
 	claims, _ := c.resolve(req, nil)
-	return audienceFrom(claims["aud"])
+	return oauth2.AudienceList(claims["aud"])
 }
 
 func (c *MappingCallback) AddClaims(req *oauth2.TokenRequest) map[string]any {
@@ -230,7 +229,7 @@ func (w *mappingWithExtra) TypeHeader(req *oauth2.TokenRequest) string {
 
 func (w *mappingWithExtra) Audience(req *oauth2.TokenRequest) []string {
 	claims, _ := w.c.resolve(req, w.extra)
-	return audienceFrom(claims["aud"])
+	return oauth2.AudienceList(claims["aud"])
 }
 
 func (w *mappingWithExtra) AddClaims(req *oauth2.TokenRequest) map[string]any {
@@ -239,22 +238,6 @@ func (w *mappingWithExtra) AddClaims(req *oauth2.TokenRequest) map[string]any {
 }
 
 func (w *mappingWithExtra) TokenExpiry() int64 { return w.c.TokenExpiry() }
-
-func audienceFrom(v any) []string {
-	switch t := v.(type) {
-	case string:
-		return []string{t}
-	case []any:
-		var out []string
-		for _, e := range t {
-			if s, ok := e.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
-}
 
 // templateValues replaces ${var} occurrences in string claim values.
 func templateValues(claims map[string]any, params map[string]string) map[string]any {

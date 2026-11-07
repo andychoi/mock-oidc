@@ -40,11 +40,7 @@ func WithRoutes(method, path string, h routing.Handler) Option {
 // (self-signed localhost certificate unless a keystore is configured).
 func New(cfg *config.OAuth2Config, opts ...Option) (*Server, error) {
 	if cfg == nil {
-		kp, err := token.DefaultKeyProvider("RS256")
-		if err != nil {
-			return nil, err
-		}
-		cfg = &config.OAuth2Config{TokenProvider: token.NewTokenProvider(kp, nil)}
+		cfg = &config.OAuth2Config{}
 	}
 	if cfg.TokenProvider == nil {
 		kp, err := token.DefaultKeyProvider("RS256")
@@ -56,14 +52,7 @@ func New(cfg *config.OAuth2Config, opts ...Option) (*Server, error) {
 
 	s := &Server{}
 	if cfg.SSL != nil {
-		setup, err := httpserver.NewTLS(httpserver.Options{
-			KeyPassword:      cfg.SSL.KeyPassword,
-			KeystoreFile:     cfg.SSL.KeystoreFile,
-			KeystoreType:     cfg.SSL.KeystoreType,
-			KeystorePassword: cfg.SSL.KeystorePassword,
-			CertFile:         cfg.SSL.CertificateFile,
-			KeyFile:          cfg.SSL.PrivateKeyFile,
-		})
+		setup, err := httpserver.NewTLS(httpserver.Options(*cfg.SSL))
 		if err != nil {
 			return nil, err
 		}

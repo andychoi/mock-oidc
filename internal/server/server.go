@@ -65,7 +65,8 @@ type Server struct {
 // Option configures a Server at construction.
 type Option func(*Server)
 
-// WithOwnBase sets the lazy resolver for the server's own bound base URL.
+// WithOwnBase sets the lazy resolver for the server's own bound base URL; it
+// must already map wildcard binds to loopback.
 func WithOwnBase(fn func() string) Option { return func(s *Server) { s.ownBase = fn } }
 
 // WithTrustPool sets the server's own TLS trust pool (self or keystore cert).
@@ -193,7 +194,7 @@ func (s *Server) buildRouter() *routing.Router {
 	})
 
 	if s.ownBase != nil {
-		debugger.New(s.ownURL, func() *x509.CertPool { return s.trustPool }).Register(rt)
+		debugger.New(s.ownBase, s.trustPool).Register(rt)
 	}
 	if s.config.Entra != nil {
 		eh := entra.New(s.config.Entra)
@@ -263,32 +264,6 @@ func (s *Server) AdminSetSetting(name string, value bool) error {
 
 var errEntraNotConfigured = errors.New("entra mode is not configured for this server")
 
-// SetOwnBase replaces the own-base resolver; call before serving starts.
-func (s *Server) SetOwnBase(fn func() string) { s.ownBase = fn }
-
-// SetTrustPool sets the server's own TLS certificate pool; call before serving
-// starts so the debugger's internal exchange trusts the server certificate.
-func (s *Server) SetTrustPool(pool *x509.CertPool) { s.trustPool = pool }
-
-// ownURL resolves the server's own URL for a path, switching wildcard binds to
-// loopback so the debugger's exchange is connectable.
-func (s *Server) ownURL(path string) string {
-	base := s.ownBase()
-	u, err := url.Parse(base)
-	if err != nil {
-		return base + path
-	}
-	host := u.Hostname()
-	if host == "0.0.0.0" || host == "::" || host == "" {
-		if u.Port() != "" {
-			u.Host = "localhost:" + u.Port()
-		} else {
-			u.Host = "localhost"
-		}
-	}
-	return u.String() + path
-}
-
 func (s *Server) wellKnown(req *oauth2.Request) routing.Response {
 	doc := jsonx.Obj{
 		{Name: "issuer", V: req.IssuerURL()},
@@ -342,6 +317,12 @@ func (s *Server) authorizePost(req *oauth2.Request) routing.Response {
 // authenticationSuccess mints the code and renders the 302 (or form_post
 // auto-submit page) carrying code and state.
 func (s *Server) authenticationSuccess(req *oauth2.Request, ar *oauth2.AuthRequest, lg *login.Login) routing.Response {
+	// Deliberate divergence from navikt: the form_post page auto-submits to
+	// redirect_uri on this server's origin, so a javascript: or data: URI
+	// would run script there.
+	if ar.ResponseMode == "form_post" && !isHTTPURL(ar.RedirectURI) {
+		panic(oauth2.InvalidRequest("invalid request: response_mode=form_post requires an http or https redirect_uri"))
+	}
 	code, oerr := s.authCode.AuthorizationCodeResponse(ar, lg)
 	if oerr != nil {
 		panic(oerr)
@@ -354,6 +335,11 @@ func (s *Server) authenticationSuccess(req *oauth2.Request, ar *oauth2.AuthReque
 		panic(oerr)
 	}
 	return routing.Redirect(location)
+}
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
 
 func (s *Server) token(req *oauth2.Request) routing.Response {

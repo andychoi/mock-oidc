@@ -58,14 +58,7 @@ func main() {
 
 	var tlsSetup *httpserver.TLS
 	if cfg.SSL != nil {
-		tlsSetup, err = httpserver.NewTLS(httpserver.Options{
-			KeyPassword:      cfg.SSL.KeyPassword,
-			KeystoreFile:     cfg.SSL.KeystoreFile,
-			KeystoreType:     cfg.SSL.KeystoreType,
-			KeystorePassword: cfg.SSL.KeystorePassword,
-			CertFile:         cfg.SSL.CertificateFile,
-			KeyFile:          cfg.SSL.PrivateKeyFile,
-		})
+		tlsSetup, err = httpserver.NewTLS(httpserver.Options(*cfg.SSL))
 		if err != nil {
 			slog.Error("failed to configure TLS", "error", err)
 			os.Exit(1)
@@ -76,7 +69,11 @@ func main() {
 	// in once the listener exists. The server reads it through this stable
 	// closure so reassignment below is visible.
 	ownBase := func() string { return "" }
-	srv := server.New(cfg, server.WithOwnBase(func() string { return ownBase() }), server.WithDirectory(dir))
+	opts := []server.Option{server.WithOwnBase(func() string { return ownBase() }), server.WithDirectory(dir)}
+	if tlsSetup != nil {
+		opts = append(opts, server.WithTrustPool(tlsSetup.TrustPool()))
+	}
+	srv := server.New(cfg, opts...)
 	srv.AddRouteFront(http.MethodGet, "/isalive", func(*oauth2.Request) routing.Response {
 		resp := routing.Response{Status: 200, Header: http.Header{}}
 		resp.Body = "alive and well"
@@ -96,7 +93,6 @@ func main() {
 		// ReadHeaderTimeout bounds the sniff peek and the TLS handshake.
 		ln = httpserver.Dual(ln, tlsSetup.Config)
 		scheme = "https"
-		srv.SetTrustPool(tlsSetup.TrustPool())
 	}
 	base := scheme + "://" + net.JoinHostPort(loopbackIfWildcard(bindHost), bindPort)
 	ownBase = func() string { return base }

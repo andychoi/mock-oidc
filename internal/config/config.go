@@ -42,13 +42,14 @@ type OAuth2Config struct {
 // certificate/key pair (certificateFile/privateKeyFile) as an alternative to
 // the PKCS12 keystore — e.g. an mkcert local-CA certificate for
 // https://oidc.dev.test. Setting both forms is a fatal boot error.
+// Its fields match httpserver.Options so one converts to the other directly.
 type SSLSettings struct {
 	KeyPassword      string `json:"keyPassword"`
 	KeystoreFile     string `json:"keystoreFile"`
 	KeystoreType     string `json:"keystoreType"`
 	KeystorePassword string `json:"keystorePassword"`
-	CertificateFile  string `json:"certificateFile"`
-	PrivateKeyFile   string `json:"privateKeyFile"`
+	CertFile         string `json:"certificateFile"`
+	KeyFile          string `json:"privateKeyFile"`
 }
 
 type tokenProviderConfig struct {
