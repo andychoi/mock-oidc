@@ -155,7 +155,14 @@ func (s *Server) TokenProvider() *token.TokenProvider { return s.tp }
 
 func (s *Server) buildRouter() *routing.Router {
 	rt := routing.New()
-	rt.AddResponseInterceptor(cors.Interceptor)
+	rt.AddResponseInterceptor(func(req *oauth2.Request, resp routing.Response) routing.Response {
+		// The admin surface is unauthenticated, so reflecting any Origin with
+		// credentials would let every web page read and drive it.
+		if p := strings.Trim(req.URL.Path, "/"); p == "admin" || strings.HasPrefix(p, "admin/") {
+			return resp
+		}
+		return cors.Interceptor(req, resp)
+	})
 
 	rt.Get(oauth2.OAuth2WellKnown, s.wellKnown)
 	rt.Get(oauth2.OIDCWellKnown, s.wellKnown)

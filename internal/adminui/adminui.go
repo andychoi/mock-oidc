@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -128,7 +129,13 @@ func (a *Handler) Handle(req *oauth2.Request) routing.Response {
 		return a.serveMCP(req)
 	}
 	if strings.HasPrefix(rest, "api/") {
-		if req.Method != http.MethodGet && req.Method != http.MethodPost && req.Method != http.MethodPut && req.Method != http.MethodDelete {
+		switch req.Method {
+		case http.MethodGet, http.MethodDelete:
+		case http.MethodPost, http.MethodPut:
+			if !jsonContent(req) {
+				return apiError(http.StatusUnsupportedMediaType, "content-type must be application/json")
+			}
+		default:
 			return routing.MethodNotAllowed()
 		}
 		return a.api(req, strings.TrimPrefix(rest, "api/"))
@@ -140,6 +147,20 @@ func (a *Handler) Handle(req *oauth2.Request) routing.Response {
 		return a.serve("index.html")
 	}
 	return a.serve(rest)
+}
+
+// jsonContent reports whether a write may reach the API. A JSON media type
+// forces a CORS preflight on any cross-origin browser request, and the admin
+// surface answers preflights without CORS headers. Browsers attach Origin to
+// every POST, so a write with neither Content-Type nor Origin comes from a
+// non-browser client.
+func jsonContent(req *oauth2.Request) bool {
+	ct := req.Header.Get("Content-Type")
+	if ct == "" && req.Header.Get("Origin") == "" {
+		return true
+	}
+	mt, _, _ := mime.ParseMediaType(ct)
+	return mt == "application/json"
 }
 
 func (a *Handler) serve(name string) routing.Response {

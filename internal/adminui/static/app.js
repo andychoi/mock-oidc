@@ -102,7 +102,7 @@
     }
     return res.json();
   }
-  const POST = { method: 'POST' };
+  const POST = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
   const DEL = { method: 'DELETE' };
   function PUT(body) {
     return { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
