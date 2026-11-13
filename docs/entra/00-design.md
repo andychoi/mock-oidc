@@ -8,7 +8,8 @@ API, `userinfo`, selection hints, and app-only tokens are in
 mapping are in [`04-org-directory-design.md`](04-org-directory-design.md).
 
 Entra mode is opt-in. With no Entra config, the server keeps the navikt 6.0.2 contract (C1 to C9
-in [`../plan/00-overview.md`](../plan/00-overview.md)).
+in [`../plan/00-overview.md`](../plan/00-overview.md)). App registrations and the Entra admin
+center page are in [`05-app-registrations-design.md`](05-app-registrations-design.md).
 
 ## 1. Scope
 
@@ -22,11 +23,13 @@ Emulated:
 - Group claims as display names or object IDs, and group overage.
 - Admin consent and the consent-missing error.
 - Per-user error injection, a disabled account, and a simulated passkey step.
+- App registrations that opt in to redirect-URI and client-secret enforcement
+  ([`05-app-registrations-design.md`](05-app-registrations-design.md)). An unregistered
+  `client_id` and secret still work everywhere.
 
-Not emulated: real Conditional Access, Microsoft's UI and exact error wording, app registrations
-(any `client_id` and secret work), refresh-token redemption, implicit and hybrid flows,
-`form_post` and `fragment` response modes, tenant lookup by domain name in the path, SAML, and
-WS-Fed.
+Not emulated: real Conditional Access, Microsoft's UI and exact error wording, refresh-token
+redemption, implicit and hybrid flows, `form_post` and `fragment` response modes, tenant lookup
+by domain name in the path, SAML, and WS-Fed.
 
 ## 2. Architecture
 

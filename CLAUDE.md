@@ -15,6 +15,9 @@ Entra test tenant exists. Read the reference doc before changing an area. The pl
 3. Org directory: `department` and `extensionAttribute1-3`, dynamic groups (`rule.go`), `$filter`
    (`filter.go`), `$expand=manager`, `apps[].claims` mapping:
    [`docs/entra/04-org-directory-design.md`](docs/entra/04-org-directory-design.md)
+4. App registrations and the Entra admin center page: opt-in redirect-URI and client-secret
+   enforcement, `/admin/portal/`:
+   [`docs/entra/05-app-registrations-design.md`](docs/entra/05-app-registrations-design.md)
 
 The Graph surface (`internal/entra/graph.go`, `odata.go`, `verify.go`, `directory.go`) is on
 whenever Entra mode is, mounted on a reserved segment of the same front route and scoped by the
@@ -25,14 +28,17 @@ PascalCase codes such as `InvalidAuthenticationToken`.
 ## Admin UI (`internal/adminui`)
 
 Embedded single-page dashboard at `/admin/` (front routes `/admin` and `/admin/*`, GitHub Primer
-theme ported from ai-gateway's admin UI). Maintains runtime state: entra tenants/users via the
-copy-on-write `entra.Store` (mutations re-run `Config.normalize`, so runtime edits keep every
-startup invariant), consent revoke/reset, key rotation, the login directory
-(`internal/directory`, seeded from `USER_DIRECTORY_PATH`/`demo-users.json`), and server settings
-toggles (interactiveLogin, rotateRefreshToken and entra are atomics on `*server.Server`, and the
-entra toggle gates the front route with 405s; graph lives in the `entra.Store`, so Reset undoes
-it). All edits are in-memory; resets restore the config-file seed. `adminui` imports `entra`/`directory` directly; `entra` still imports neither
+theme ported from ai-gateway's admin UI). Maintains runtime state: entra tenants/users and app
+registrations via the copy-on-write `entra.Store` (mutations re-run `Config.normalize`, so
+runtime edits keep every startup invariant), consent revoke/reset, key rotation, the login
+directory (`internal/directory`, seeded from `USER_DIRECTORY_PATH`/`demo-users.json`), and
+server settings toggles (interactiveLogin, rotateRefreshToken and entra are atomics on
+`*server.Server`, and the entra toggle gates the front route with 405s; graph lives in the
+`entra.Store`, so Reset undoes it). All edits are in-memory; resets restore the config-file
+seed. `adminui` imports `entra`/`directory` directly; `entra` still imports neither
 `adminui` nor `config`. UI changes need no build step. Edit `internal/adminui/static/` and restart.
+`/admin/portal/` serves a second embedded SPA in `static/portal/`, the Entra admin center App
+registrations replica (Fluent look, hash routing); every path under it serves the shell.
 The same operations are MCP tools at `/admin/mcp` (`mcp.go` transport, `mcp_tools.go` registry; each
 tool's schema and decoder derive from its Go input struct).
 

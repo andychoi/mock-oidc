@@ -106,8 +106,14 @@ in-memory state only. A restart returns to the config files, and every page has 
   token-callback issuer, and runtime toggles for interactive login, refresh-token rotation,
   Entra mode, and the Entra Graph API.
 - **Entra** (only when configured) edits tenants and users, including the profile fields Graph
-  serves. It lists consents with per-row revoke and signing keys with rotation, and has
-  **Reset to config**. Edits get the same validation as the config file.
+  serves. It lists app registrations, consents with per-row revoke, and signing keys with
+  rotation, and has **Reset to config**. Edits get the same validation as the config file.
+- **Entra admin center** (`/admin/portal/`, linked from the Entra page when configured) is a
+  replica of the Microsoft Entra admin center's App registrations experience: the list, New
+  registration, Overview with the Essentials panel, Authentication (redirect URIs),
+  Certificates & secrets (client secrets), App roles, and Token configuration. Registering a
+  redirect URI or a client secret opts that app into enforcement (see
+  [Entra mode](#entra-mode)).
 - **Directory** edits the login page's quick-pick users. The login page fetches them live. The
   directory loads from `USER_DIRECTORY_PATH`, or from `./demo-users.json` when that variable is
   unset and the file exists. The login page still accepts any username.
@@ -118,13 +124,17 @@ The dashboard calls a JSON API under `/admin/api/`:
 |---|---|---|
 | GET | `overview` | Server counts and toggles |
 | GET, POST | `settings` | Read the toggles. Set one with `{"name": "...", "value": true}`. Names: `interactiveLogin`, `rotateRefreshToken`, `entra`, `graph`. |
-| GET | `entra` | Entra tenants, users, consents, and keys |
+| GET | `entra` | Entra apps, tenants, users, consents, and keys |
 | POST | `entra/reset` | Restore tenants, users, and consents from the config seed. Keys stay. |
 | POST | `entra/rotate-keys` | Rotate the signing key |
 | POST | `entra/tenants` | Create a tenant |
 | PUT, DELETE | `entra/tenants/{tid}` | Update or delete a tenant |
 | POST | `entra/users` | Create a user |
 | PUT, DELETE | `entra/users/{tid}/{username}` | Update or delete a user |
+| POST | `entra/apps` | Register an app. Returns the created registration, with the generated client ID when the request leaves `clientId` empty. |
+| PUT, DELETE | `entra/apps/{clientId}` | Update a registration (secrets are kept), or delete it with its consents |
+| POST | `entra/apps/{clientId}/secrets` | Add a client secret. Body `{"description", "expires"}`, `expires` one of `6m`, `12m`, `24m` or an RFC 3339 timestamp. Returns the one-time value. |
+| DELETE | `entra/apps/{clientId}/secrets/{secretId}` | Delete a client secret |
 | DELETE | `entra/consents/{clientId}/{tid}` | Revoke a consent |
 | GET | `directory` | Login directory users |
 | POST | `directory/users`, `directory/reset` | Add or replace a user, or restore the seed |
@@ -154,7 +164,9 @@ claude mcp add --transport http mock-oidc https://oidc.dev.test/admin/mcp
   `directory_delete_user`, `directory_reset`.
 - Entra, when configured: `entra_get_state`, `entra_create_tenant`, `entra_update_tenant`,
   `entra_delete_tenant`, `entra_create_user`, `entra_update_user`, `entra_delete_user`,
-  `entra_revoke_consent`, `entra_reset`, `entra_rotate_keys`, `entra_mint_token`.
+  `entra_create_app`, `entra_update_app`, `entra_delete_app`, `entra_add_app_secret`,
+  `entra_delete_app_secret`, `entra_revoke_consent`, `entra_reset`, `entra_rotate_keys`,
+  `entra_mint_token`.
 
 The endpoint is Streamable HTTP, stateless, and JSON only. It serves protocol `2026-07-28` and
 the `initialize`-based versions `2025-03-26` to `2025-11-25`. Every request needs
@@ -295,11 +307,21 @@ All paths are under `/entra/_entra/`:
 `mint-token` refuses a disabled account or one configured with `"error": "invalid_grant"`, as the
 token endpoint does.
 
+### App registrations
+
+An entry in the config's `apps[]` is an app registration, managed in the Entra admin center page
+at `/admin/portal/`. A registration that lists redirect URIs opts into redirect-URI enforcement
+on authorize (a request with any other `redirect_uri` gets `AADSTS50011`), and one that carries
+client secrets opts into client authentication on the token endpoint (a missing, wrong, or
+expired secret gets `AADSTS7000215`). An app without them, and an unregistered `client_id`,
+stay permissive. Details and divergences are in
+[`docs/entra/05-app-registrations-design.md`](docs/entra/05-app-registrations-design.md).
+
 ### Not emulated
 
 Real Conditional Access, Microsoft's UI and exact error wording, refresh-token redemption,
 implicit and hybrid flows, Graph writes, OData beyond the subset above, nested groups
-(`transitiveMemberOf` equals `memberOf`), app registrations, device code flow, and Graph beyond
+(`transitiveMemberOf` equals `memberOf`), device code flow, and Graph beyond
 accounts and groups.
 
 ## User directory
