@@ -46,8 +46,9 @@ func (c *Config) App(clientID, tid string) *App {
 }
 
 // clientCredentials mints an app-only token. Any client id and secret are
-// accepted, as everywhere else in mock-oidc; the registration only supplies
-// the app roles.
+// accepted, as everywhere else in mock-oidc — unless the app registered
+// client secrets, which are then enforced (appSecretOK); the registration
+// also supplies the app roles.
 func (h *Handler) clientCredentials(req *oauth2.Request, sc scope, cfg *Config) routing.Response {
 	// An app-only token names one tenant, and organizations/common name none,
 	// so Entra has nothing to put in tid there either.
@@ -64,6 +65,9 @@ func (h *Handler) clientCredentials(req *oauth2.Request, sc scope, cfg *Config) 
 	if clientID == "" {
 		return routing.ErrorResponse(&oauth2.Error{Code: "invalid_client",
 			Description: "AADSTS900023: client_id is required.", Status: http.StatusBadRequest})
+	}
+	if !h.appSecretOK(cfg, clientID, sc.Tenant.TID, req) {
+		return invalidClientSecret()
 	}
 	// Entra requires a .default resource scope here; a named delegated scope
 	// is a client error worth surfacing rather than silently accepting.

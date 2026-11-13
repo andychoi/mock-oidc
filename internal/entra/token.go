@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/andychoi/mock-oidc/internal/jsonx"
 	"github.com/andychoi/mock-oidc/internal/oauth2"
@@ -42,6 +43,9 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 	if tr.RedirectURI != c.req.RedirectURI {
 		return invalidGrant("redirect_uri does not match the authorization request")
 	}
+	if !h.appSecretOK(cfg, tr.ClientID, c.tid, req) {
+		return invalidClientSecret()
+	}
 	if !pkceOK(c.req, tr.CodeVerifier) {
 		return invalidGrant("AADSTS501481: The Code_Verifier does not match the code_challenge supplied in the authorization request.")
 	}
@@ -73,6 +77,44 @@ func (h *Handler) token(req *oauth2.Request, sc scope) routing.Response {
 
 func invalidGrant(description string) routing.Response {
 	return routing.ErrorResponse(oauth2.InvalidGrant(description))
+}
+
+// invalidClientSecret rejects a client credential of an app that registered
+// secrets, with Entra's AADSTS7000215.
+func invalidClientSecret() routing.Response {
+	return routing.ErrorResponse(oauth2.InvalidClient(
+		"AADSTS7000215: Invalid client secret provided."))
+}
+
+// appSecretOK enforces the registered client secrets of the app matching this
+// token request: an app that declares secrets must present a matching,
+// unexpired client_secret (form parameter or Basic auth password). Everything
+// else — an unregistered client, an app bound to another tenant, an app
+// without secrets — keeps the permissive default.
+func (h *Handler) appSecretOK(cfg *Config, clientID, tid string, req *oauth2.Request) bool {
+	app := cfg.App(clientID, tid)
+	if app == nil || len(app.Secrets) == 0 {
+		return true
+	}
+	secret := req.FormParam("client_secret")
+	if secret == "" {
+		if _, pass, ok := req.BasicAuth(); ok {
+			secret = pass
+		}
+	}
+	if secret == "" {
+		return false
+	}
+	now := h.now()
+	for _, s := range app.Secrets {
+		if exp, err := time.Parse(time.RFC3339, s.Expires); err == nil && now.After(exp) {
+			continue // expired
+		}
+		if subtle.ConstantTimeCompare([]byte(s.Value), []byte(secret)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // pkceOK enforces PKCE when the authorize request carried a code_challenge:

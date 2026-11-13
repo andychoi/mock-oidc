@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ErrNotFound is returned by Store mutations that reference an unknown tenant
@@ -196,6 +197,159 @@ func (s *Store) DeleteUser(tid, username string) error {
 	})
 }
 
+// CreateApp adds an app registration and returns it as stored: an empty
+// clientId gets a generated GUID (the New registration form), normalize derives
+// the object ID and sign-in audience. now stamps CreatedOn when unset.
+func (s *Store) CreateApp(a App, now time.Time) (App, error) {
+	if a.ClientID == "" {
+		a.ClientID = RandomGUID()
+	}
+	if a.CreatedOn == "" {
+		a.CreatedOn = now.UTC().Format(time.RFC3339)
+	}
+	if err := s.mutate(func(c *Config) error {
+		c.Apps = append(c.Apps, a)
+		return nil
+	}); err != nil {
+		return App{}, err
+	}
+	stored := s.Snapshot().AppByID(a.ClientID)
+	if stored == nil { // unreachable: mutate published a config containing it
+		return App{}, fmt.Errorf("app %s: %w", a.ClientID, ErrNotFound)
+	}
+	return *stored, nil
+}
+
+// UpdateApp replaces the registration fields of app clientID (name, tid,
+// sign-in audience, redirect URIs, roles, claims). clientId is immutable — it
+// keys consents and issued tokens; object ID and CreatedOn keep their stored
+// values when the body omits them; secrets are managed by AddAppSecret and
+// DeleteAppSecret and are preserved regardless of the body.
+func (s *Store) UpdateApp(clientID string, a App) error {
+	if a.ClientID != "" && a.ClientID != clientID {
+		return fmt.Errorf("clientId cannot be changed")
+	}
+	return s.mutate(func(c *Config) error {
+		for i := range c.Apps {
+			if c.Apps[i].ClientID != clientID {
+				continue
+			}
+			a.ClientID = clientID
+			if a.ObjectID == "" {
+				a.ObjectID = c.Apps[i].ObjectID
+			}
+			if a.CreatedOn == "" {
+				a.CreatedOn = c.Apps[i].CreatedOn
+			}
+			a.Secrets = c.Apps[i].Secrets
+			c.Apps[i] = a
+			return nil
+		}
+		return fmt.Errorf("app %s: %w", clientID, ErrNotFound)
+	})
+}
+
+// DeleteApp removes the app registration and the seed consents naming it (the
+// caller purges runtime consents via ConsentStore.RemoveClient).
+func (s *Store) DeleteApp(clientID string) error {
+	return s.mutate(func(c *Config) error {
+		kept := c.Apps[:0]
+		found := false
+		for _, a := range c.Apps {
+			if a.ClientID == clientID {
+				found = true
+				continue
+			}
+			kept = append(kept, a)
+		}
+		if !found {
+			return fmt.Errorf("app %s: %w", clientID, ErrNotFound)
+		}
+		c.Apps = kept
+		consents := c.Consents[:0]
+		for _, cs := range c.Consents {
+			if cs.ClientID != clientID {
+				consents = append(consents, cs)
+			}
+		}
+		c.Consents = consents
+		return nil
+	})
+}
+
+// AddAppSecret adds a client secret to app clientID and returns it with its
+// one-time value. expires is either an Entra relative duration ("6m", "12m",
+// "24m" — months) or an absolute RFC 3339 timestamp.
+func (s *Store) AddAppSecret(clientID, description, expires string, now time.Time) (AppSecret, error) {
+	exp, err := secretExpiry(expires, now)
+	if err != nil {
+		return AppSecret{}, fmt.Errorf("app %s: %w", clientID, err)
+	}
+	sec := AppSecret{
+		ID:          RandomGUID(),
+		Description: strings.TrimSpace(description),
+		Value:       RandomSecretValue(),
+		Expires:     exp.UTC().Format(time.RFC3339),
+		CreatedOn:   now.UTC().Format(time.RFC3339),
+	}
+	if err := s.mutate(func(c *Config) error {
+		for i := range c.Apps {
+			if c.Apps[i].ClientID == clientID {
+				c.Apps[i].Secrets = append(c.Apps[i].Secrets, sec)
+				return nil
+			}
+		}
+		return fmt.Errorf("app %s: %w", clientID, ErrNotFound)
+	}); err != nil {
+		return AppSecret{}, err
+	}
+	return sec, nil
+}
+
+// DeleteAppSecret removes one secret of app clientID by its secret ID.
+func (s *Store) DeleteAppSecret(clientID, secretID string) error {
+	return s.mutate(func(c *Config) error {
+		for i := range c.Apps {
+			if c.Apps[i].ClientID != clientID {
+				continue
+			}
+			kept := c.Apps[i].Secrets[:0]
+			found := false
+			for _, sec := range c.Apps[i].Secrets {
+				if sec.ID == secretID {
+					found = true
+					continue
+				}
+				kept = append(kept, sec)
+			}
+			if !found {
+				return fmt.Errorf("app %s: secret %s: %w", clientID, secretID, ErrNotFound)
+			}
+			c.Apps[i].Secrets = kept
+			return nil
+		}
+		return fmt.Errorf("app %s: %w", clientID, ErrNotFound)
+	})
+}
+
+// secretExpiry resolves a secret's expiry: "6m", "12m" and "24m" count months
+// from now (the New client secret dialog), anything else must be RFC 3339.
+func secretExpiry(expires string, now time.Time) (time.Time, error) {
+	switch strings.TrimSpace(expires) {
+	case "6m":
+		return now.AddDate(0, 6, 0), nil
+	case "12m":
+		return now.AddDate(1, 0, 0), nil
+	case "24m":
+		return now.AddDate(2, 0, 0), nil
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(expires))
+	if err != nil {
+		return time.Time{}, errors.New("expires must be 6m, 12m, 24m or an RFC 3339 timestamp")
+	}
+	return t, nil
+}
+
 // cloneConfig deep-copies the slice fields so published snapshots never share
 // backing arrays with a future mutation.
 func cloneConfig(c *Config) *Config {
@@ -224,6 +378,8 @@ func cloneConfig(c *Config) *Config {
 		out.Apps[i] = a
 		out.Apps[i].Roles = append([]string(nil), a.Roles...)
 		out.Apps[i].Claims = append([]ClaimMapping(nil), a.Claims...)
+		out.Apps[i].RedirectURIs = append([]RedirectURI(nil), a.RedirectURIs...)
+		out.Apps[i].Secrets = append([]AppSecret(nil), a.Secrets...)
 	}
 	for i, u := range c.Users {
 		out.Users[i] = u

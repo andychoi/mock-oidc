@@ -239,10 +239,24 @@ func (h *Handler) authorize(req *oauth2.Request, sc scope) routing.Response {
 	if rm := ar.ResponseMode; rm != "" && rm != "query" {
 		return unsupportedResponseMode(rm)
 	}
+	// A registered app that declares redirect URIs accepts only those URIs, like
+	// Entra; an unregistered client (or one without URIs) keeps the permissive
+	// default. The check runs before any UI so a bad URI never reaches a picker.
+	if app := h.conf().AppByID(ar.ClientID); app != nil && !app.RedirectAllowed(ar.RedirectURI) {
+		return redirectURIMismatch(ar.ClientID, ar.RedirectURI)
+	}
 	if req.Method == http.MethodPost {
 		return h.authorizePost(req, sc, ar)
 	}
 	return h.authorizeGet(req, sc, ar)
+}
+
+// redirectURIMismatch rejects an out-of-list redirect URI with Entra's
+// AADSTS50011. A 400 error page, not an error redirect: the browser must not
+// be sent to a URI the app never registered.
+func redirectURIMismatch(clientID, redirectURI string) routing.Response {
+	return routing.ErrorResponse(oauth2.InvalidRequest(
+		"AADSTS50011: The redirect URI '" + redirectURI + "' specified in the request does not match the redirect URIs configured for the application '" + clientID + "'."))
 }
 
 func (h *Handler) authorizeGet(req *oauth2.Request, sc scope, ar *oauth2.AuthRequest) routing.Response {

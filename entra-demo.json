@@ -35,9 +35,14 @@
     { "clientId": "iam", "tid": "11111111-1111-1111-1111-111111111111" }
   ],
   "apps": [
-    { "clientId": "iam-sync", "tid": "11111111-1111-1111-1111-111111111111",
+    { "clientId": "iam-sync", "name": "IAM Directory Sync (daemon)", "tid": "11111111-1111-1111-1111-111111111111",
+      "redirectUris": [],
       "roles": ["User.Read.All", "Group.Read.All"] },
-    { "clientId": "iam", "tid": "44444444-4444-4444-4444-444444444444",
+    { "clientId": "iam", "name": "IAM Web Console", "tid": "44444444-4444-4444-4444-444444444444",
+      "redirectUris": [
+        { "platform": "web", "uri": "https://iam.dev.test/oidc/callback" },
+        { "platform": "spa", "uri": "http://localhost:5173/auth/callback" }
+      ],
       "claims": [
         { "name": "org_code", "source": "user.extensionAttribute1" },
         { "name": "department", "source": "user.department" }

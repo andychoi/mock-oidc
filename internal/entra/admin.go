@@ -76,11 +76,7 @@ func (h *Handler) AdminSnapshot() any {
 	}
 	apps := jsonx.Arr{}
 	for _, a := range cfg.Apps {
-		apps = append(apps, jsonx.Obj{
-			{Name: "clientId", V: a.ClientID},
-			{Name: "tid", V: a.TID},
-			{Name: "roles", V: a.Roles},
-		})
+		apps = append(apps, AppObj(a))
 	}
 	return jsonx.Obj{
 		{Name: "basePath", V: cfg.BasePath},
@@ -158,6 +154,80 @@ func (h *Handler) AdminUpdateUser(tid, username string, u User) error {
 // AdminDeleteUser removes the user username from tenant tid.
 func (h *Handler) AdminDeleteUser(tid, username string) error {
 	return h.store.DeleteUser(tid, username)
+}
+
+// AdminCreateApp registers an app and returns it as stored, with the
+// generated client ID and object ID filled in.
+func (h *Handler) AdminCreateApp(a App) (App, error) { return h.store.CreateApp(a, h.now()) }
+
+// AdminUpdateApp replaces the registration fields of app clientID (secrets are
+// preserved; see Store.UpdateApp).
+func (h *Handler) AdminUpdateApp(clientID string, a App) error {
+	return h.store.UpdateApp(clientID, a)
+}
+
+// AdminDeleteApp removes the app registration and its consents.
+func (h *Handler) AdminDeleteApp(clientID string) error {
+	if err := h.store.DeleteApp(clientID); err != nil {
+		return err
+	}
+	h.consents.RemoveClient(clientID)
+	return nil
+}
+
+// AdminAddAppSecret adds a client secret to app clientID and returns it with
+// its one-time value.
+func (h *Handler) AdminAddAppSecret(clientID, description, expires string) (AppSecret, error) {
+	return h.store.AddAppSecret(clientID, description, expires, h.now())
+}
+
+// AdminDeleteAppSecret removes one secret of app clientID by its secret ID.
+func (h *Handler) AdminDeleteAppSecret(clientID, secretID string) error {
+	return h.store.DeleteAppSecret(clientID, secretID)
+}
+
+// AppObj renders one app registration for the admin API: the AdminSnapshot
+// entries and the create-app response use the same shape. Secret values are
+// included (a deliberate mock divergence — Entra never shows them again).
+func AppObj(a App) jsonx.Obj {
+	secrets := jsonx.Arr{}
+	for _, s := range a.Secrets {
+		secrets = append(secrets, AppSecretObj(s))
+	}
+	redirects := jsonx.Arr{}
+	for _, r := range a.RedirectURIs {
+		redirects = append(redirects, jsonx.Obj{
+			{Name: "platform", V: r.Platform},
+			{Name: "uri", V: r.URI},
+		})
+	}
+	claims := jsonx.Arr{}
+	for _, m := range a.Claims {
+		claims = append(claims, jsonx.Obj{{Name: "name", V: m.Name}, {Name: "source", V: m.Source}})
+	}
+	return jsonx.Obj{
+		{Name: "clientId", V: a.ClientID},
+		{Name: "name", V: a.Name},
+		{Name: "tid", V: a.TID},
+		{Name: "objectId", V: a.ObjectID},
+		{Name: "signInAudience", V: a.SignInAudience},
+		{Name: "redirectUris", V: redirects},
+		{Name: "roles", V: a.Roles},
+		{Name: "claims", V: claims},
+		{Name: "secrets", V: secrets},
+		{Name: "createdOn", V: a.CreatedOn},
+	}
+}
+
+// AppSecretObj renders one client secret (value included; see AppObj).
+func AppSecretObj(s AppSecret) jsonx.Obj {
+	return jsonx.Obj{
+		{Name: "id", V: s.ID},
+		{Name: "description", V: s.Description},
+		{Name: "value", V: s.Value},
+		{Name: "expires", V: s.Expires},
+		{Name: "createdOn", V: s.CreatedOn},
+	}
 }
 
 // AdminRevokeConsent removes one consent (seeded consents return on Reset).

@@ -11,8 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Group claim formats.
@@ -54,12 +56,54 @@ type Config struct {
 // App is an optional client registration. Entra mode accepts any client_id on
 // every flow; an entry here supplies the app roles an app-only token carries
 // (§8 of the Graph design) and the claims mappings its ID tokens get (§7 of
-// the org directory design).
+// the org directory design). A registration that declares redirect URIs or
+// client secrets opts in to having them enforced on the authorize and token
+// endpoints (docs/entra/05-app-registrations-design.md).
 type App struct {
 	ClientID string         `json:"clientId"`
 	TID      string         `json:"tid"`
 	Roles    []string       `json:"roles"`
 	Claims   []ClaimMapping `json:"claims"`
+
+	// Registration metadata, rendered by the Entra admin center page. Every
+	// field is optional; object ID, sign-in audience and display name are
+	// derived when empty.
+	Name           string        `json:"name"`
+	ObjectID       string        `json:"objectId"`
+	SignInAudience string        `json:"signInAudience"`
+	RedirectURIs   []RedirectURI `json:"redirectUris"`
+	Secrets        []AppSecret   `json:"secrets"`
+	CreatedOn      string        `json:"createdOn"`
+}
+
+// Sign-in audiences (the registration form's Supported account types).
+const (
+	AudienceMyOrg     = "AzureADMyOrg"        // single tenant (app has a tid)
+	AudienceMultiOrgs = "AzureADMultipleOrgs" // any tenant (tid stays empty)
+)
+
+// Redirect URI platforms (the Authentication blade's platform types).
+const (
+	PlatformWeb              = "web"
+	PlatformSPA              = "spa"
+	PlatformMobileAndDesktop = "mobileAndDesktop"
+)
+
+// RedirectURI is one configured redirect URI and its platform.
+type RedirectURI struct {
+	Platform string `json:"platform"`
+	URI      string `json:"uri"`
+}
+
+// AppSecret is a client secret of the Certificates & secrets blade. Entra
+// shows the value exactly once; this mock also keeps it in the clear (and in
+// the admin snapshot) so a lost value never blocks a dev flow.
+type AppSecret struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+	Value       string `json:"value"`
+	Expires     string `json:"expires"`   // RFC 3339
+	CreatedOn   string `json:"createdOn"` // RFC 3339
 }
 
 // ClaimMapping adds one directory attribute to the ID tokens issued to an app,
@@ -224,6 +268,7 @@ func (c *Config) normalize() error {
 			return err
 		}
 	}
+	apps := map[string]bool{}
 	for i := range c.Apps {
 		a := &c.Apps[i]
 		a.ClientID = strings.TrimSpace(a.ClientID)
@@ -231,8 +276,15 @@ func (c *Config) normalize() error {
 		if a.ClientID == "" {
 			return fmt.Errorf("app %d: clientId is required", i)
 		}
+		if apps[a.ClientID] {
+			return fmt.Errorf("app %s: duplicate clientId", a.ClientID)
+		}
+		apps[a.ClientID] = true
 		if a.TID != "" && !tenants[a.TID] {
 			return fmt.Errorf("app %s: unknown tid %q", a.ClientID, a.TID)
+		}
+		if err := normalizeRegistration(a); err != nil {
+			return err
 		}
 		if err := normalizeClaims(a); err != nil {
 			return err
@@ -406,6 +458,142 @@ func normalizeClaims(a *App) error {
 	return nil
 }
 
+// normalizeRegistration validates an app's registration metadata and fills in
+// the derived fields: display name (defaults to the clientId), object ID (a
+// stable UUIDv5, like a user OID), and sign-in audience (from the tid).
+func normalizeRegistration(a *App) error {
+	if a.Name == "" {
+		a.Name = a.ClientID
+	}
+	a.ObjectID = strings.ToLower(strings.TrimSpace(a.ObjectID))
+	if a.ObjectID != "" && !guidRE.MatchString(a.ObjectID) {
+		return fmt.Errorf("app %s: objectId must be a GUID", a.ClientID)
+	}
+	if a.ObjectID == "" {
+		a.ObjectID = UUIDv5(appNamespace, "app:"+a.ClientID)
+	}
+	switch a.SignInAudience {
+	case "":
+		if a.TID != "" {
+			a.SignInAudience = AudienceMyOrg
+		} else {
+			a.SignInAudience = AudienceMultiOrgs
+		}
+	case AudienceMyOrg, AudienceMultiOrgs:
+	default:
+		return fmt.Errorf("app %s: signInAudience must be %q or %q", a.ClientID, AudienceMyOrg, AudienceMultiOrgs)
+	}
+	if a.SignInAudience == AudienceMyOrg && a.TID == "" {
+		return fmt.Errorf("app %s: signInAudience %q requires a tid", a.ClientID, AudienceMyOrg)
+	}
+	if a.SignInAudience == AudienceMultiOrgs && a.TID != "" {
+		return fmt.Errorf("app %s: signInAudience %q cannot carry a tid", a.ClientID, AudienceMultiOrgs)
+	}
+	if a.CreatedOn != "" {
+		if _, err := time.Parse(time.RFC3339, a.CreatedOn); err != nil {
+			return fmt.Errorf("app %s: createdOn must be an RFC 3339 timestamp", a.ClientID)
+		}
+	}
+	uris := map[string]bool{}
+	for i := range a.RedirectURIs {
+		r := &a.RedirectURIs[i]
+		r.Platform = strings.TrimSpace(r.Platform)
+		r.URI = strings.TrimSpace(r.URI)
+		if r.URI == "" {
+			return fmt.Errorf("app %s: redirectUris[%d]: uri is required", a.ClientID, i)
+		}
+		switch r.Platform {
+		case PlatformWeb, PlatformSPA, PlatformMobileAndDesktop:
+		case "":
+			r.Platform = PlatformWeb
+		default:
+			return fmt.Errorf("app %s: redirectUris[%d]: platform must be %q, %q or %q",
+				a.ClientID, i, PlatformWeb, PlatformSPA, PlatformMobileAndDesktop)
+		}
+		if err := validRedirectURI(r.Platform, r.URI); err != nil {
+			return fmt.Errorf("app %s: redirectUris[%d]: %w", a.ClientID, i, err)
+		}
+		if uris[r.URI] {
+			return fmt.Errorf("app %s: duplicate redirect uri %q", a.ClientID, r.URI)
+		}
+		uris[r.URI] = true
+	}
+	ids := map[string]bool{}
+	for i := range a.Secrets {
+		s := &a.Secrets[i]
+		s.ID = strings.ToLower(strings.TrimSpace(s.ID))
+		s.Description = strings.TrimSpace(s.Description)
+		s.Value = strings.TrimSpace(s.Value)
+		if s.ID == "" || !guidRE.MatchString(s.ID) {
+			return fmt.Errorf("app %s: secrets[%d]: id must be a GUID", a.ClientID, i)
+		}
+		if ids[s.ID] {
+			return fmt.Errorf("app %s: duplicate secret id %s", a.ClientID, s.ID)
+		}
+		ids[s.ID] = true
+		if s.Value == "" {
+			return fmt.Errorf("app %s: secrets[%d]: value is required", a.ClientID, i)
+		}
+		if _, err := time.Parse(time.RFC3339, s.Expires); err != nil {
+			return fmt.Errorf("app %s: secrets[%d]: expires must be an RFC 3339 timestamp", a.ClientID, i)
+		}
+		if s.CreatedOn != "" {
+			if _, err := time.Parse(time.RFC3339, s.CreatedOn); err != nil {
+				return fmt.Errorf("app %s: secrets[%d]: createdOn must be an RFC 3339 timestamp", a.ClientID, i)
+			}
+		}
+	}
+	return nil
+}
+
+// validRedirectURI enforces per-platform URI shapes. Web and SPA redirects are
+// https URLs (http is allowed on localhost, Entra's dev exception and what
+// every e2e callback uses); mobile-and-desktop redirects are loopback http
+// URLs or custom (non-http) schemes such as msal<id>://auth.
+func validRedirectURI(platform, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" {
+		return errors.New("not an absolute URI")
+	}
+	switch platform {
+	case PlatformWeb, PlatformSPA:
+		if (u.Scheme == "https" || (u.Scheme == "http" && isLoopback(u.Hostname()))) && u.Host != "" {
+			return nil
+		}
+		return errors.New("web and spa redirect uris must be https URLs (http is allowed on localhost)")
+	case PlatformMobileAndDesktop:
+		if u.Scheme == "http" && isLoopback(u.Hostname()) {
+			return nil
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return nil // custom scheme, e.g. msal4b1db123-...://auth (whose host is "auth")
+		}
+		return errors.New("mobileAndDesktop redirect uris must be custom schemes or http loopback URLs")
+	}
+	return nil
+}
+
+// isLoopback reports whether a URI host is a loopback name or address.
+func isLoopback(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// RedirectAllowed reports whether redirectURI may be used by this app. An app
+// without registered redirect URIs accepts anything (the permissive default
+// every unregistered client gets); one with registrations requires an exact
+// match, like Entra.
+func (a *App) RedirectAllowed(uri string) bool {
+	if len(a.RedirectURIs) == 0 {
+		return true
+	}
+	for _, r := range a.RedirectURIs {
+		if r.URI == uri {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeProfile validates and lowercases the optional account fields.
 func normalizeProfile(u *User) error {
 	u.UPN = strings.ToLower(strings.TrimSpace(u.UPN))
@@ -437,6 +625,18 @@ func (c *Config) User(tid, username string) *User {
 	for i := range c.Users {
 		if c.Users[i].TID == tid && c.Users[i].Username == username {
 			return &c.Users[i]
+		}
+	}
+	return nil
+}
+
+// AppByID returns the registration with clientId, whatever tenant it is bound
+// to, or nil. Enforcement (redirect URIs) and the admin UI key apps by
+// clientId alone; the tenant-scoped lookup is Config.App in appcreds.go.
+func (c *Config) AppByID(clientID string) *App {
+	for i := range c.Apps {
+		if c.Apps[i].ClientID == clientID {
+			return &c.Apps[i]
 		}
 	}
 	return nil

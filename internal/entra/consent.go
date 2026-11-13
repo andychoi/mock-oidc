@@ -67,6 +67,17 @@ func (s *ConsentStore) RemoveTenant(tid string) {
 	}
 }
 
+// RemoveClient drops every consent of a client (app registration cascade).
+func (s *ConsentStore) RemoveClient(clientID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k := range s.granted {
+		if strings.HasPrefix(k, clientID+"|") {
+			delete(s.granted, k)
+		}
+	}
+}
+
 // List returns the consents sorted by tenant, then client ID.
 func (s *ConsentStore) List() []Consent {
 	s.mu.RLock()
