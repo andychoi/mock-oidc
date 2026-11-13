@@ -84,6 +84,16 @@ var registry = []tool{
 		ownerEntra, writes, entraUpdateUser),
 	defineTool("entra_delete_user", "Delete an Entra user.",
 		ownerEntra, destroys, entraDeleteUser),
+	defineTool("entra_create_app", "Register an Entra app. An empty clientId gets a generated GUID; returns the stored registration (client ID, object ID, sign-in audience).",
+		ownerEntra, writes, entraCreateApp),
+	defineTool("entra_update_app", "Replace the registration fields of the Entra app clientId (name, tid, signInAudience, redirectUris, roles, claims). Client secrets are kept.",
+		ownerEntra, writes, entraUpdateApp),
+	defineTool("entra_delete_app", "Delete an Entra app registration with its consents.",
+		ownerEntra, destroys, entraDeleteApp),
+	defineTool("entra_add_app_secret", "Add a client secret to an Entra app and return it with its one-time value. A registered secret is enforced at the token endpoint.",
+		ownerEntra, writes, entraAddAppSecret),
+	defineTool("entra_delete_app_secret", "Delete one client secret of an Entra app by secret ID.",
+		ownerEntra, destroys, entraDeleteAppSecret),
 	defineTool("entra_revoke_consent", "Revoke one app's consent in a tenant. Revoking an absent consent succeeds.",
 		ownerEntra, destroys, entraRevokeConsent),
 	defineTool("entra_reset", "Restore Entra tenants, users and consents to the config seed. Signing keys are kept.",
@@ -135,6 +145,30 @@ type userUpdateInput struct {
 type userKeyInput struct {
 	TID      string `json:"tid" mcp:"required" desc:"tenant ID"`
 	Username string `json:"username" mcp:"required"`
+}
+
+type appCreateInput struct {
+	App entra.App `json:"app" mcp:"required"`
+}
+
+type appUpdateInput struct {
+	ClientID string    `json:"clientId" mcp:"required" desc:"current client ID (immutable)"`
+	App      entra.App `json:"app" mcp:"required" desc:"the app's new registration fields"`
+}
+
+type appKeyInput struct {
+	ClientID string `json:"clientId" mcp:"required"`
+}
+
+type appSecretInput struct {
+	ClientID    string `json:"clientId" mcp:"required"`
+	Description string `json:"description"`
+	Expires     string `json:"expires" desc:"6m, 12m, 24m or an RFC 3339 timestamp"`
+}
+
+type appSecretKeyInput struct {
+	ClientID string `json:"clientId" mcp:"required"`
+	SecretID string `json:"secretId" mcp:"required"`
 }
 
 type consentInput struct {
@@ -202,6 +236,34 @@ func entraUpdateUser(c toolCtx, in userUpdateInput) (jsonx.Obj, error) {
 
 func entraDeleteUser(c toolCtx, in userKeyInput) (jsonx.Obj, error) {
 	return statusOK, c.entra.AdminDeleteUser(in.TID, in.Username)
+}
+
+func entraCreateApp(c toolCtx, in appCreateInput) (jsonx.Obj, error) {
+	app, err := c.entra.AdminCreateApp(in.App)
+	if err != nil {
+		return nil, err
+	}
+	return entra.AppObj(app), nil
+}
+
+func entraUpdateApp(c toolCtx, in appUpdateInput) (jsonx.Obj, error) {
+	return statusOK, c.entra.AdminUpdateApp(in.ClientID, in.App)
+}
+
+func entraDeleteApp(c toolCtx, in appKeyInput) (jsonx.Obj, error) {
+	return statusOK, c.entra.AdminDeleteApp(in.ClientID)
+}
+
+func entraAddAppSecret(c toolCtx, in appSecretInput) (jsonx.Obj, error) {
+	sec, err := c.entra.AdminAddAppSecret(in.ClientID, in.Description, in.Expires)
+	if err != nil {
+		return nil, err
+	}
+	return entra.AppSecretObj(sec), nil
+}
+
+func entraDeleteAppSecret(c toolCtx, in appSecretKeyInput) (jsonx.Obj, error) {
+	return statusOK, c.entra.AdminDeleteAppSecret(in.ClientID, in.SecretID)
 }
 
 func entraRevokeConsent(c toolCtx, in consentInput) (jsonx.Obj, error) {

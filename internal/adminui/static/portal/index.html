@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App registrations | Microsoft Entra admin center (mock)</title>
+<link rel="stylesheet" href="/admin/portal/portal.css">
+<script src="/admin/portal/portal.js" defer></script>
+</head>
+<body>
+<header class="shellbar">
+  <button class="shellbar-btn" id="nav-toggle" type="button" title="Show menu" aria-label="Show menu">
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg>
+  </button>
+  <a class="shellbar-brand" href="#/apps">
+    <svg class="entra-mark" viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="#742774" d="M0 0h8v8H0z"/><path fill="#0078d4" d="M8 0h8v8H8z"/><path fill="#50e6ff" d="M0 8h8v8H0z"/><path fill="#b747f2" d="M8 8h8v8H8z"/></svg>
+    <span class="shellbar-title">Microsoft Entra</span>
+  </a>
+  <span class="shellbar-tag" title="A mock of the Entra admin center, served by mock-oidc">mock</span>
+  <div class="shellbar-search" title="Search is not part of the mock">
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z"/></svg>
+    <input type="text" placeholder="Search" disabled aria-label="Search (not part of the mock)">
+  </div>
+  <div class="shellbar-right">
+    <span class="shellbar-btn dim" title="Not part of the mock">
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M9.1 4.4 8.6 2H7.4l-.5 2.4-.7.3-2-1.3-.9.8 1.3 2-.2.7-2.4.5v1.2l2.4.5.3.7-1.3 2 .8.8 2-1.3.7.3.5 2.4h1.2l.5-2.4.7-.3 2 1.3.8-.8-1.3-2 .3-.7 2.4-.5V8.6l-2.4-.5-.3-.7 1.3-2-.8-.8-2 1.3-.7-.3ZM9.4 1l.5 2.4L12 2l2 2-1.4 2.1 2.4.4v2.9l-2.4.4L14 12l-2 2-2.1-1.4-.4 2.4H6.6l-.4-2.4L4 14l-2-2 1.4-2.1L1 9.4V6.6l2.4-.4L2 4l2-2 2.1 1.4.4-2.4h2.9ZM8 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z"/></svg>
+    </span>
+    <span class="shellbar-btn dim" title="Not part of the mock">
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 1.5c-2.976 0-5.5 2.382-5.5 5.5v2.917c0 .69-.56 1.25-1.25 1.25h-.25a.75.75 0 0 0 0 1.5h14a.75.75 0 0 0 0-1.5h-.25c-.69 0-1.25-.56-1.25-1.25V7c0-3.118-2.524-5.5-5.5-5.5ZM6.207 14.042A2.5 2.5 0 0 0 8 15a2.5 2.5 0 0 0 1.793-.958H6.207Z"/></svg>
+    </span>
+    <span class="shellbar-avatar dim" title="Not signed in — this is a mock">A</span>
+  </div>
+</header>
+<div class="shell">
+  <nav class="blade" id="blade" aria-label="Microsoft Entra menu">
+    <div class="blade-scroll">
+      <div class="nav-section">
+        <button class="nav-group" type="button" aria-expanded="true" data-group="identity">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0L10.5 6.44a.75.75 0 0 1 0 1.06L7.28 10.72a.75.75 0 1 1-1.06-1.06L8.94 7 6.22 4.28a.75.75 0 0 1 0-1.06Z" transform="rotate(90 8 7)"/></svg>
+          Identity
+        </button>
+        <div class="nav-items" data-group-items="identity">
+          <a class="nav-item dim" href="#/apps" title="Not part of the mock">Overview</a>
+          <button class="nav-group sub" type="button" aria-expanded="true" data-group="applications">
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0L10.5 6.44a.75.75 0 0 1 0 1.06L7.28 10.72a.75.75 0 1 1-1.06-1.06L8.94 7 6.22 4.28a.75.75 0 0 1 0-1.06Z" transform="rotate(90 8 7)"/></svg>
+            Applications
+          </button>
+          <div class="nav-items sub" data-group-items="applications">
+            <a class="nav-item active" href="#/apps">App registrations</a>
+            <a class="nav-item dim" href="#/apps" title="Not part of the mock">Enterprise applications</a>
+            <a class="nav-item dim" href="#/apps" title="Not part of the mock">App federations</a>
+          </div>
+          <a class="nav-item dim" href="#/apps" title="Not part of the mock">External identities</a>
+          <a class="nav-item dim" href="#/apps" title="Not part of the mock">Hybrid management</a>
+          <a class="nav-item dim" href="#/apps" title="Not part of the mock">Licensing</a>
+          <a class="nav-item dim" href="#/apps" title="Not part of the mock">Protection</a>
+        </div>
+      </div>
+      <div class="nav-section">
+        <button class="nav-group" type="button" aria-expanded="false" data-group="monitoring">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0L10.5 6.44a.75.75 0 0 1 0 1.06L7.28 10.72a.75.75 0 1 1-1.06-1.06L8.94 7 6.22 4.28a.75.75 0 0 1 0-1.06Z" transform="rotate(90 8 7)"/></svg>
+          Monitoring &amp; health
+        </button>
+        <div class="nav-items hidden" data-group-items="monitoring"></div>
+      </div>
+      <div class="nav-section">
+        <button class="nav-group" type="button" aria-expanded="false" data-group="troubleshooting">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0L10.5 6.44a.75.75 0 0 1 0 1.06L7.28 10.72a.75.75 0 1 1-1.06-1.06L8.94 7 6.22 4.28a.75.75 0 0 1 0-1.06Z" transform="rotate(90 8 7)"/></svg>
+          Troubleshooting
+        </button>
+        <div class="nav-items hidden" data-group-items="troubleshooting"></div>
+      </div>
+    </div>
+    <div class="blade-foot">
+      <a class="nav-item" href="/admin/">← mock-oidc admin</a>
+    </div>
+  </nav>
+  <main class="content" id="view" aria-live="polite"></main>
+</div>
+<div id="modal-root"></div>
+<div id="toast" class="toast hidden" role="status"></div>
+</body>
+</html>

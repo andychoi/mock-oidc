@@ -45,6 +45,9 @@ var assets = map[string]webFile{}
 // indexHTML is kept separately for the /admin and /admin/ shell paths.
 var indexHTML []byte
 
+// portalHTML is the /admin/portal shell (its own SPA with hash routing).
+var portalHTML []byte
+
 func init() {
 	types := map[string]string{
 		".html":  "text/html; charset=utf-8",
@@ -53,33 +56,45 @@ func init() {
 		".woff2": "font/woff2",
 		".txt":   "text/plain; charset=utf-8",
 	}
-	entries, err := fs.ReadDir(staticFS, "static")
+	contentType := func(name string) string {
+		for ext, t := range types {
+			if len(name) >= len(ext) && name[len(name)-len(ext):] == ext {
+				return t
+			}
+		}
+		return "application/octet-stream"
+	}
+	// The static dir is walked recursively (the portal lives in static/portal/)
+	// so "exactly these files" stays a property of the directory itself.
+	err := fs.WalkDir(staticFS, "static", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		body, err := staticFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		name := "/" + strings.TrimPrefix(path, "static/")
+		assets[name] = webFile{body: body, contentType: contentType(d.Name())}
+		switch name {
+		case "/index.html":
+			indexHTML = body
+		case "/portal/index.html":
+			portalHTML = body
+		}
+		return nil
+	})
 	if err != nil {
 		panic("adminui: cannot read embedded static dir: " + err.Error())
 	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		body, err := staticFS.ReadFile("static/" + name)
-		if err != nil {
-			panic("adminui: cannot read embedded asset " + name + ": " + err.Error())
-		}
-		ct := "application/octet-stream"
-		for ext, t := range types {
-			if len(name) >= len(ext) && name[len(name)-len(ext):] == ext {
-				ct = t
-				break
-			}
-		}
-		assets["/"+name] = webFile{body: body, contentType: ct}
-		if name == "index.html" {
-			indexHTML = body
-		}
-	}
 	if indexHTML == nil {
 		panic("adminui: static/index.html missing")
+	}
+	if portalHTML == nil {
+		panic("adminui: static/portal/index.html missing")
 	}
 }
 
@@ -149,6 +164,15 @@ func (a *Handler) Handle(req *oauth2.Request) routing.Response {
 	}
 	if rest == "" {
 		return a.serve("index.html")
+	}
+	// The portal (the Entra admin center page) is its own hash-routed SPA: its
+	// real files (portal.css, portal.js) resolve directly and every other path
+	// under it serves the shell.
+	if rest == "portal" || rest == "portal/" || strings.HasPrefix(rest, "portal/") {
+		if _, ok := assets["/"+rest]; ok {
+			return a.serve(rest)
+		}
+		return a.serve("portal/index.html")
 	}
 	return a.serve(rest)
 }
@@ -284,6 +308,28 @@ func (a *Handler) api(req *oauth2.Request, action string) routing.Response {
 			return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
 		}
 
+	// --- entra: app registrations (the Entra admin center page) ---
+	case post && action == "entra/apps":
+		return a.createApp(req)
+	case len(segs) >= 3 && segs[0] == "entra" && segs[1] == "apps":
+		clientID := segs[2]
+		switch {
+		case put && len(segs) == 3:
+			return a.updateApp(req, clientID)
+		case del && len(segs) == 3:
+			if err := a.entra.AdminDeleteApp(clientID); err != nil {
+				return deleteError(err)
+			}
+			return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
+		case post && len(segs) == 4 && segs[3] == "secrets":
+			return a.addAppSecret(req, clientID)
+		case del && len(segs) == 5 && segs[3] == "secrets":
+			if err := a.entra.AdminDeleteAppSecret(clientID, segs[4]); err != nil {
+				return deleteError(err)
+			}
+			return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
+		}
+
 	// --- directory ---
 	case get && action == "directory":
 		return routing.JSON(directoryArr(a.dir))
@@ -367,6 +413,53 @@ func (a *Handler) upsertUser(req *oauth2.Request, tid, username string) routing.
 		return badRequest(err)
 	}
 	return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
+}
+
+// createApp registers an app. Unlike the tenant/user upserts it returns the
+// created registration, not {status: ok}: the New registration form needs the
+// generated client ID and object ID before it can route to the app page.
+func (a *Handler) createApp(req *oauth2.Request) routing.Response {
+	var app entra.App
+	if err := decode(req, &app); err != nil {
+		return badRequest(err)
+	}
+	created, err := a.entra.AdminCreateApp(app)
+	if err != nil {
+		return badRequest(err)
+	}
+	return routing.JSON(entra.AppObj(created))
+}
+
+// updateApp replaces the registration fields of app clientID. Secrets in the
+// body are ignored and preserved (they are managed by their own endpoints).
+func (a *Handler) updateApp(req *oauth2.Request, clientID string) routing.Response {
+	var app entra.App
+	if err := decode(req, &app); err != nil {
+		return badRequest(err)
+	}
+	if err := a.entra.AdminUpdateApp(clientID, app); err != nil {
+		if errors.Is(err, entra.ErrNotFound) || strings.HasSuffix(err.Error(), ": not found") {
+			return apiError(404, err.Error())
+		}
+		return badRequest(err)
+	}
+	return routing.JSON(jsonx.Obj{{Name: "status", V: "ok"}})
+}
+
+// addAppSecret adds a client secret and returns it with its one-time value.
+func (a *Handler) addAppSecret(req *oauth2.Request, clientID string) routing.Response {
+	var body struct {
+		Description string `json:"description"`
+		Expires     string `json:"expires"`
+	}
+	if err := decode(req, &body); err != nil {
+		return badRequest(err)
+	}
+	sec, err := a.entra.AdminAddAppSecret(clientID, body.Description, body.Expires)
+	if err != nil {
+		return deleteError(err)
+	}
+	return routing.JSON(entra.AppSecretObj(sec))
 }
 
 func (a *Handler) upsertDirectoryUser(req *oauth2.Request) routing.Response {

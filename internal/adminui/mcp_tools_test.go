@@ -168,6 +168,76 @@ func TestToolAvailabilityFollowsOwners(t *testing.T) {
 	}
 }
 
+// The five app-registration tools round-trip the same lifecycle the admin API
+// serves: create returns the generated identity, add-secret returns the
+// one-time value, update keeps secrets, and both deletes converge.
+func TestMCPAppRegistrationTools(t *testing.T) {
+	rt := newRouter(testEntra(t), nil, nil)
+
+	res := callLegacy(t, rt, "entra_create_app", map[string]any{
+		"app": map[string]any{"name": "Portal", "tid": corpTID, "redirectUris": []any{
+			map[string]any{"platform": "web", "uri": "http://localhost:8123/cb"}}}})
+	if res["isError"] != false {
+		t.Fatalf("create app = %v", res)
+	}
+	app := res["structuredContent"].(map[string]any)
+	clientID, _ := app["clientId"].(string)
+	if clientID == "" || app["objectId"] == "" || app["signInAudience"] != "AzureADMyOrg" {
+		t.Fatalf("created app = %v", app)
+	}
+
+	state := callLegacy(t, rt, "entra_get_state", nil)["structuredContent"].(map[string]any)
+	if findByKey(t, state["apps"], "clientId", clientID)["name"] != "Portal" {
+		t.Fatalf("created app missing from state")
+	}
+
+	sec := callLegacy(t, rt, "entra_add_app_secret", map[string]any{
+		"clientId": clientID, "description": "ci", "expires": "6m"})["structuredContent"].(map[string]any)
+	secretID, value, _ := sec["id"].(string), sec["value"].(string), sec["description"]
+	if secretID == "" || value == "" {
+		t.Fatalf("added secret = %v", sec)
+	}
+
+	res = callLegacy(t, rt, "entra_update_app", map[string]any{"clientId": clientID,
+		"app": map[string]any{"tid": corpTID, "name": "Renamed"}})
+	if res["isError"] != false {
+		t.Fatalf("update app = %v", res)
+	}
+	state = callLegacy(t, rt, "entra_get_state", nil)["structuredContent"].(map[string]any)
+	entry := findByKey(t, state["apps"], "clientId", clientID)
+	if entry["name"] != "Renamed" {
+		t.Fatalf("update not applied: %v", entry)
+	}
+	if secrets, _ := entry["secrets"].([]any); len(secrets) != 1 || secrets[0].(map[string]any)["value"] != value {
+		t.Fatalf("update must keep secrets: %v", entry["secrets"])
+	}
+
+	if res = callLegacy(t, rt, "entra_delete_app_secret", map[string]any{"clientId": clientID, "secretId": secretID}); res["isError"] != false {
+		t.Fatalf("delete secret = %v", res)
+	}
+	state = callLegacy(t, rt, "entra_get_state", nil)["structuredContent"].(map[string]any)
+	if secrets, _ := findByKey(t, state["apps"], "clientId", clientID)["secrets"].([]any); len(secrets) != 0 {
+		t.Fatalf("secret not deleted: %v", secrets)
+	}
+
+	if res = callLegacy(t, rt, "entra_delete_app", map[string]any{"clientId": clientID}); res["isError"] != false {
+		t.Fatalf("delete app = %v", res)
+	}
+	state = callLegacy(t, rt, "entra_get_state", nil)["structuredContent"].(map[string]any)
+	for _, a := range state["apps"].([]any) {
+		if a.(map[string]any)["clientId"] == clientID {
+			t.Fatalf("app still in state after delete")
+		}
+	}
+
+	if res = callLegacy(t, rt, "entra_update_app", map[string]any{"clientId": "ghost", "app": map[string]any{}}); res["isError"] != true {
+		t.Errorf("update unknown app = %v, want an error", res)
+	}
+	if res = callLegacy(t, rt, "entra_add_app_secret", map[string]any{"clientId": "ghost", "expires": "6m"}); res["isError"] != true {
+		t.Errorf("secret on unknown app = %v, want an error", res)
+	}
+}
+
 func TestToolsCoverOwnerOperations(t *testing.T) {
 	bound := map[string]string{
 		"entra.AdminSnapshot":        "entra_get_state",
@@ -177,6 +247,11 @@ func TestToolsCoverOwnerOperations(t *testing.T) {
 		"entra.AdminCreateUser":      "entra_create_user",
 		"entra.AdminUpdateUser":      "entra_update_user",
 		"entra.AdminDeleteUser":      "entra_delete_user",
+		"entra.AdminCreateApp":       "entra_create_app",
+		"entra.AdminUpdateApp":       "entra_update_app",
+		"entra.AdminDeleteApp":       "entra_delete_app",
+		"entra.AdminAddAppSecret":    "entra_add_app_secret",
+		"entra.AdminDeleteAppSecret": "entra_delete_app_secret",
 		"entra.AdminRevokeConsent":   "entra_revoke_consent",
 		"entra.AdminResetToSeed":     "entra_reset",
 		"entra.AdminRotateKeys":      "entra_rotate_keys",

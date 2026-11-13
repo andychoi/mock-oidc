@@ -261,6 +261,7 @@
       try { entra = await api('entra'); } catch (e) { entra = null; }
     }
     $('#nav a[data-route="entra"]').classList.toggle('hidden', !entra);
+    $('#portal-link').classList.toggle('hidden', !entra);
     directoryOn = false;
     try {
       directory = await api('directory');
@@ -422,10 +423,15 @@
       (g.enabled && g.appOnly ? ' · app-only tokens on' : '') +
       (entra.ignoreLoginHint ? ' · login_hint ignored' : '') +
       ' · edits are in-memory; "Reset to config" restores the config file.'));
+    const portalRow = add(view, el('p'));
+    const portalLink = add(portalRow, el('a', null, 'Open the Entra admin center (App registrations) →'));
+    portalLink.href = '/admin/portal/';
+    drawAppRegs(view);
 
     const cards = add(view, el('div', 'cards'));
     card(cards, 'Tenants', String(entra.tenants.length));
     card(cards, 'Users', String(entra.users.length));
+    card(cards, 'Apps', String((entra.apps || []).length));
     card(cards, 'Consents', String(entra.consents.length));
     card(cards, 'Active kid', entra.keys.activeKid);
 
@@ -433,6 +439,34 @@
     drawUsers(view);
     drawConsents(view);
     drawKeys(view);
+  }
+
+  // drawAppRegs renders the read-only app registrations digest; the Entra
+  // admin center page (/admin/portal/) is where registrations are managed.
+  function drawAppRegs(view) {
+    sectionHead(view, 'App registrations', 'Open Entra admin center', () => {
+      window.open('/admin/portal/', '_blank', 'noopener');
+    }, 'plus');
+    const wrap = add(view, el('div', 'table-wrap'));
+    const table = add(wrap, el('table'));
+    const hr = add(add(table, el('thead')), el('tr'));
+    for (const h of ['Name', 'Client ID', 'Tenant', 'Redirect URIs', 'Secrets', 'Roles', '']) {
+      add(hr, el('th', null, h));
+    }
+    const tbody = add(table, el('tbody'));
+    for (const a of entra.apps || []) {
+      const tr = add(tbody, el('tr'));
+      add(tr, el('td', null, a.name));
+      add(tr, el('td', 'mono', a.clientId));
+      add(tr, el('td', 'mono', a.tid || 'any'));
+      add(tr, el('td', 'num', String((a.redirectUris || []).length)));
+      add(tr, el('td', 'num', String((a.secrets || []).length)));
+      add(tr, el('td', 'num', String((a.roles || []).length)));
+      const act = add(tr, el('td'));
+      const link = add(act, el('a', 'mono', 'manage →'));
+      link.href = '/admin/portal/#/apps/' + encodeURIComponent(a.clientId);
+    }
+    if (!(entra.apps || []).length) add(view, el('div', 'empty', 'No app registrations.'));
   }
 
   function sectionHead(view, title, btnLabel, onClick, btnIcon) {
